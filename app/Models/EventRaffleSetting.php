@@ -5,15 +5,13 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class RaffleWinner extends Model
+class EventRaffleSetting extends Model
 {
-    protected $fillable = [
-        'event_id', 'name', 'won_at',
-    ];
+    protected $fillable = ['event_id', 'remove_winners', 'speed', 'theme'];
 
     protected function casts(): array
     {
-        return ['won_at' => 'datetime'];
+        return ['remove_winners' => 'boolean', 'speed' => 'integer'];
     }
 
     public function event(): BelongsTo

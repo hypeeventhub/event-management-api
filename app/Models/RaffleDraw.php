@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class RaffleDraw extends Model
 {
@@ -15,7 +14,7 @@ class RaffleDraw extends Model
     public const STATUS_CANCELLED = 'cancelled';
 
     protected $fillable = [
-        'event_id', 'registration_id', 'selected_by', 'status',
+        'event_id', 'raffle_entry_id', 'selected_by', 'status',
         'selected_at', 'confirmed_at', 'cancelled_at', 'expires_at',
     ];
 
@@ -34,18 +33,13 @@ class RaffleDraw extends Model
         return $this->belongsTo(Event::class);
     }
 
-    public function registration(): BelongsTo
+    public function raffleEntry(): BelongsTo
     {
-        return $this->belongsTo(Registration::class);
+        return $this->belongsTo(RaffleEntry::class);
     }
 
     public function selectedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'selected_by');
-    }
-
-    public function winner(): HasOne
-    {
-        return $this->hasOne(RaffleWinner::class);
     }
 }

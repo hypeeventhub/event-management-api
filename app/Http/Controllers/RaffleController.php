@@ -4,236 +4,163 @@ namespace App\Http\Controllers;
 
 use App\Models\Event;
 use App\Models\RaffleDraw;
-use App\Models\RaffleWinner;
-use App\Models\Registration;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class RaffleController extends Controller
 {
     public const PENDING_MINUTES = 10;
 
+    private const THEMES = ['purple', 'violet', 'indigo', 'blue', 'teal', 'green', 'amber', 'orange', 'rose', 'pink'];
+
     public function show(Request $request, Event $event): JsonResponse
     {
-        abort_unless($event->created_by === $request->user()->id, 404);
-
-        $eligible = $event->registrations()
-            ->select(['id', 'event_id', 'attendee_id'])
-            ->where('status', 'confirmed')
-            ->whereDoesntHave('raffleWinner', fn ($query) => $query->where('event_id', $event->id))
-            ->whereDoesntHave('raffleDraws', fn ($query) => $query
-                ->where('event_id', $event->id)
-                ->where('status', RaffleDraw::STATUS_PENDING)
-                ->where('expires_at', '>', now()))
-            ->with('attendee:id,first_name,last_name,email')
-            ->orderBy('id')
-            ->get()
-            ->map(fn (Registration $registration) => $this->attendeeData($registration));
-
-        $pending = $event->raffleDraws()
-            ->select(['id', 'event_id', 'registration_id', 'selected_at', 'expires_at'])
-            ->where('status', RaffleDraw::STATUS_PENDING)
-            ->where('expires_at', '>', now())
-            ->whereHas('registration', fn ($query) => $query->where('event_id', $event->id))
-            ->with('registration:id,event_id,attendee_id', 'registration.attendee:id,first_name,last_name,email')
-            ->latest('id')
-            ->first();
-
-        $winners = $event->raffleWinners()
-            ->select(['id', 'event_id', 'registration_id', 'won_at'])
-            ->whereHas('registration', fn ($query) => $query->where('event_id', $event->id))
-            ->with('registration:id,event_id,attendee_id', 'registration.attendee:id,first_name,last_name,email')
-            ->orderByDesc('won_at')
-            ->orderByDesc('id')
-            ->limit(100)
-            ->get()
-            ->map(fn (RaffleWinner $winner) => [
-                'id' => $winner->id,
-                ...$this->attendeeData($winner->registration),
-                'won_at' => $winner->won_at->toISOString(),
-            ]);
+        $this->owner($request, $event);
+        $this->expire($event);
+        $settings = $event->raffleSetting()->firstOrCreate([], ['remove_winners' => true, 'speed' => 3, 'theme' => 'purple']);
+        $pending = $event->raffleDraws()->where('status', 'pending')->whereNotNull('raffle_entry_id')->where('expires_at', '>', now())->with('raffleEntry')->latest('id')->first();
+        $winners = $event->raffleWinners()->orderByDesc('won_at')->orderByDesc('id')->paginate(25, ['id', 'name', 'won_at'], 'winners_page');
 
         return response()->json(['data' => [
             'event' => $event->only(['id', 'title', 'slug']),
-            'eligible_attendees' => $eligible,
-            'eligible_count' => $eligible->count(),
-            'pending_draw' => $pending ? [
-                'id' => $pending->id,
-                ...$this->attendeeData($pending->registration),
-                'selected_at' => $pending->selected_at->toISOString(),
-                'expires_at' => $pending->expires_at->toISOString(),
-            ] : null,
-            'winners' => $winners,
+            'settings' => $this->settings($settings),
+            'entries' => $event->raffleEntries()->orderBy('position')->get(['id', 'name', 'position']),
+            'pending_draw' => $pending ? $this->draw($pending) : null,
+            'winners' => $winners->items(),
+            'winner_pagination' => ['current_page' => $winners->currentPage(), 'last_page' => $winners->lastPage(), 'total' => $winners->total()],
         ]]);
+    }
+
+    public function updateSettings(Request $request, Event $event): JsonResponse
+    {
+        $this->owner($request, $event);
+        $data = $request->validate([
+            'names' => ['present', 'array', 'max:5000'], 'names.*' => ['nullable', 'string', 'max:255'],
+            'remove_winners' => ['required', 'boolean'], 'speed' => ['required', 'integer', 'between:1,5'],
+            'theme' => ['required', Rule::in(self::THEMES)],
+        ]);
+        $names = collect($data['names'])->map(fn ($name) => trim((string) $name))->filter(fn ($name) => $name !== '')->values();
+
+        return DB::transaction(function () use ($event, $data, $names) {
+            Event::whereKey($event->id)->lockForUpdate()->firstOrFail();
+            $this->expire($event);
+            if ($event->raffleDraws()->where('status', 'pending')->where('expires_at', '>', now())->exists()) {
+                return response()->json(['message' => 'Finish or cancel the current draw before changing settings.'], 409);
+            }
+            $setting = $event->raffleSetting()->updateOrCreate([], collect($data)->only(['remove_winners', 'speed', 'theme'])->all());
+            $event->raffleEntries()->delete();
+            $stamp = now();
+            if ($names->isNotEmpty()) {
+                $event->raffleEntries()->insert($names->map(fn ($name, $position) => ['event_id' => $event->id, 'name' => $name, 'position' => $position, 'created_at' => $stamp, 'updated_at' => $stamp])->all());
+            }
+
+            return response()->json(['data' => ['settings' => $this->settings($setting), 'entries' => $event->raffleEntries()->orderBy('position')->get(['id', 'name', 'position'])]]);
+        });
     }
 
     public function store(Request $request, Event $event): JsonResponse
     {
-        abort_unless($event->created_by === $request->user()->id, 404);
+        $this->owner($request, $event);
 
-        return DB::transaction(function () use ($event, $request): JsonResponse {
+        return DB::transaction(function () use ($request, $event) {
             Event::whereKey($event->id)->lockForUpdate()->firstOrFail();
-            $now = now();
-
-            $event->raffleDraws()
-                ->where('status', RaffleDraw::STATUS_PENDING)
-                ->where('expires_at', '<=', $now)
-                ->whereHas('registration', fn ($query) => $query->where('event_id', $event->id))
-                ->update(['status' => RaffleDraw::STATUS_CANCELLED, 'cancelled_at' => $now]);
-
-            $pending = $event->raffleDraws()
-                ->where('status', RaffleDraw::STATUS_PENDING)
-                ->where('expires_at', '>', $now)
-                ->whereHas('registration', fn ($query) => $query->where('event_id', $event->id))
-                ->with('registration.attendee')
-                ->first();
-
+            $this->expire($event);
+            $pending = $event->raffleDraws()->where('status', 'pending')->where('expires_at', '>', now())->with('raffleEntry')->first();
             if ($pending) {
-                return response()->json(['data' => $this->drawResponse($pending)]);
+                return response()->json(['data' => $this->draw($pending)]);
             }
-
-            $eligibleIds = $event->registrations()
-                ->where('status', 'confirmed')
-                ->whereDoesntHave('raffleWinner', fn ($query) => $query->where('event_id', $event->id))
-                ->whereDoesntHave('raffleDraws', fn ($query) => $query
-                    ->where('event_id', $event->id)
-                    ->where('status', RaffleDraw::STATUS_PENDING)
-                    ->where('expires_at', '>', $now))
-                ->pluck('id');
-
-            if ($eligibleIds->isEmpty()) {
-                return response()->json(['message' => 'No eligible attendees remain.'], 409);
+            $ids = $event->raffleEntries()->pluck('id');
+            if ($ids->isEmpty()) {
+                return response()->json(['message' => 'Add at least one name before starting the raffle.'], 409);
             }
+            $entry = $event->raffleEntries()->findOrFail($ids[random_int(0, $ids->count() - 1)]);
+            $now = now();
+            $draw = $event->raffleDraws()->create(['raffle_entry_id' => $entry->id, 'selected_by' => $request->user()->id, 'status' => 'pending', 'selected_at' => $now, 'expires_at' => $now->copy()->addMinutes(self::PENDING_MINUTES)]);
+            $draw->setRelation('raffleEntry', $entry);
 
-            $registration = $event->registrations()
-                ->whereKey($eligibleIds[random_int(0, $eligibleIds->count() - 1)])
-                ->where('status', 'confirmed')
-                ->with('attendee')
-                ->firstOrFail();
-            $draw = $event->raffleDraws()->create([
-                'registration_id' => $registration->id,
-                'selected_by' => $request->user()->id,
-                'status' => RaffleDraw::STATUS_PENDING,
-                'selected_at' => $now,
-                'expires_at' => $now->copy()->addMinutes(self::PENDING_MINUTES),
-            ]);
-            $draw->setRelation('registration', $registration);
-
-            return response()->json(['data' => $this->drawResponse($draw)], 201);
+            return response()->json(['data' => $this->draw($draw)], 201);
         });
     }
 
     public function confirm(Request $request, Event $event, string $draw): JsonResponse
     {
-        abort_unless($event->created_by === $request->user()->id, 404);
+        $this->owner($request, $event);
 
-        return DB::transaction(function () use ($event, $draw, $request): JsonResponse {
-            $lockedEvent = Event::whereKey($event->id)->lockForUpdate()->first();
-            if (! $lockedEvent || $lockedEvent->created_by !== $request->user()->id) {
-                return $this->drawNotFound();
+        return DB::transaction(function () use ($event, $draw) {
+            Event::whereKey($event->id)->lockForUpdate()->firstOrFail();
+            $record = $event->raffleDraws()->whereKey($draw)->lockForUpdate()->with('raffleEntry')->first();
+            if (! $record) {
+                return $this->missing();
             }
-
-            $draw = $lockedEvent->raffleDraws()->whereKey($draw)->lockForUpdate()->first();
-            if (! $draw) {
-                return $this->drawNotFound();
-            }
-
-            $registration = $lockedEvent->registrations()->whereKey($draw->registration_id)->lockForUpdate()->with('attendee')->first();
-            if (! $registration) {
-                return $this->drawNotFound();
-            }
-            $now = now();
-
-            if ($draw->status !== RaffleDraw::STATUS_PENDING || $draw->expires_at->lte($now)) {
+            if ($record->status !== 'pending' || $record->expires_at->lte(now())) {
                 return response()->json(['message' => 'Draw is no longer pending.'], 409);
             }
-
-            if ($registration->status !== 'confirmed' || $event->raffleWinners()->where('registration_id', $registration->id)->exists()) {
-                return response()->json(['message' => 'Registration is no longer eligible.'], 409);
+            if (! $record->raffleEntry) {
+                return $this->missing();
+            }
+            $now = now();
+            $entry = $record->raffleEntry;
+            $winner = $event->raffleWinners()->create(['name' => $entry->name, 'won_at' => $now]);
+            $record->update(['status' => 'confirmed', 'confirmed_at' => $now]);
+            $removed = $event->raffleSetting()->value('remove_winners') ?? true;
+            if ($removed) {
+                $entry->delete();
             }
 
-            $winner = $event->raffleWinners()->create([
-                'registration_id' => $registration->id,
-                'raffle_draw_id' => $draw->id,
-                'confirmed_by' => $request->user()->id,
-                'won_at' => $now,
-            ]);
-            $draw->update(['status' => RaffleDraw::STATUS_CONFIRMED, 'confirmed_at' => $now]);
-            $draw->setRelation('registration', $registration);
-
-            return response()->json(['data' => [
-                ...$this->drawResponse($draw),
-                'winner' => [
-                    'id' => $winner->id,
-                    ...$this->attendeeData($registration),
-                    'won_at' => $winner->won_at->toISOString(),
-                ],
-            ]]);
+            return response()->json(['data' => ['draw' => $this->drawData($record), 'winner' => ['id' => $winner->id, 'name' => $winner->name, 'won_at' => $winner->won_at->toISOString()], 'removed' => $removed]]);
         });
     }
 
     public function destroy(Request $request, Event $event, string $draw): JsonResponse
     {
-        abort_unless($event->created_by === $request->user()->id, 404);
+        $this->owner($request, $event);
 
-        return DB::transaction(function () use ($event, $draw, $request): JsonResponse {
-            $lockedEvent = Event::whereKey($event->id)->lockForUpdate()->first();
-            if (! $lockedEvent || $lockedEvent->created_by !== $request->user()->id) {
-                return $this->drawNotFound();
+        return DB::transaction(function () use ($event, $draw) {
+            Event::whereKey($event->id)->lockForUpdate()->firstOrFail();
+            $record = $event->raffleDraws()->whereKey($draw)->lockForUpdate()->with('raffleEntry')->first();
+            if (! $record || ! $record->raffleEntry) {
+                return $this->missing();
             }
-
-            $draw = $lockedEvent->raffleDraws()->whereKey($draw)->lockForUpdate()->first();
-            if (! $draw) {
-                return $this->drawNotFound();
-            }
-
-            $registration = $lockedEvent->registrations()->whereKey($draw->registration_id)->lockForUpdate()->with('attendee')->first();
-            if (! $registration) {
-                return $this->drawNotFound();
-            }
-
-            if ($draw->status !== RaffleDraw::STATUS_PENDING) {
+            if ($record->status !== 'pending') {
                 return response()->json(['message' => 'Draw is no longer pending.'], 409);
             }
+            $record->update(['status' => 'cancelled', 'cancelled_at' => now()]);
 
-            $draw->update(['status' => RaffleDraw::STATUS_CANCELLED, 'cancelled_at' => now()]);
-            $draw->setRelation('registration', $registration);
-
-            return response()->json(['data' => $this->drawResponse($draw)]);
+            return response()->json(['data' => $this->draw($record)]);
         });
     }
 
-    private function drawNotFound(): JsonResponse
+    private function owner(Request $request, Event $event): void
+    {
+        abort_unless($event->created_by === $request->user()->id, 404);
+    }
+
+    private function expire(Event $event): void
+    {
+        $event->raffleDraws()->where('status', 'pending')->whereNull('raffle_entry_id')
+            ->update(['status' => 'cancelled', 'cancelled_at' => now()]);
+        $event->raffleDraws()->where('status', 'pending')->where('expires_at', '<=', now())->update(['status' => 'cancelled', 'cancelled_at' => now()]);
+    }
+
+    private function settings($value): array
+    {
+        return ['remove_winners' => $value->remove_winners, 'speed' => $value->speed, 'theme' => $value->theme];
+    }
+
+    private function drawData(RaffleDraw $draw): array
+    {
+        return ['id' => $draw->id, 'status' => $draw->status, 'selected_at' => $draw->selected_at->toISOString(), 'expires_at' => $draw->expires_at->toISOString(), 'confirmed_at' => $draw->confirmed_at?->toISOString(), 'cancelled_at' => $draw->cancelled_at?->toISOString()];
+    }
+
+    private function draw(RaffleDraw $draw): array
+    {
+        return ['draw' => $this->drawData($draw), 'entry' => ['id' => $draw->raffleEntry->id, 'name' => $draw->raffleEntry->name, 'position' => $draw->raffleEntry->position]];
+    }
+
+    private function missing(): JsonResponse
     {
         return response()->json(['message' => 'Raffle draw not found.'], 404);
-    }
-
-    private function drawResponse(RaffleDraw $draw): array
-    {
-        return [
-            'draw' => [
-                'id' => $draw->id,
-                'status' => $draw->status,
-                'selected_at' => $draw->selected_at->toISOString(),
-                'expires_at' => $draw->expires_at->toISOString(),
-                'confirmed_at' => $draw->confirmed_at?->toISOString(),
-                'cancelled_at' => $draw->cancelled_at?->toISOString(),
-            ],
-            'attendee' => $this->attendeeData($draw->registration),
-        ];
-    }
-
-    private function attendeeData(Registration $registration): array
-    {
-        [$local, $domain] = explode('@', $registration->attendee->email, 2);
-
-        return [
-            'registration_id' => $registration->id,
-            'first_name' => $registration->attendee->first_name,
-            'last_name' => $registration->attendee->last_name,
-            'masked_email' => Str::substr($local, 0, 1).'***@'.$domain,
-        ];
     }
 }
