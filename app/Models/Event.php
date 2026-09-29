@@ -62,6 +62,11 @@ class Event extends Model
         return $this->hasMany(Registration::class);
     }
 
+    public function votingSubjects(): HasMany
+    {
+        return $this->hasMany(VotingSubject::class);
+    }
+
     public function raffleDraws(): HasMany
     {
         return $this->hasMany(RaffleDraw::class);

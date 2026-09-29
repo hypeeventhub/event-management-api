@@ -42,4 +42,9 @@ class Registration extends Model
     {
         return $this->hasMany(CheckIn::class);
     }
+
+    public function votingVotes(): HasMany
+    {
+        return $this->hasMany(VotingVote::class);
+    }
 }
