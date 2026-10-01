@@ -634,6 +634,71 @@ test('an event owner can retrieve every registration for an excel export', funct
         ->assertJsonPath('data.0.attendee.email', 'guest51@example.com');
 });
 
+test('an event owner can filter sort and paginate registrations', function () {
+    $owner = User::factory()->create();
+    $event = Event::findOrFail(
+        $this->actingAs($owner)->postJson('/api/events', eventPayload())->json('data.id'),
+    );
+    $form = $event->activeRegistrationForm()->firstOrFail();
+    $registrations = collect([
+        ['first_name' => 'Noah', 'last_name' => 'Baker', 'status' => 'confirmed'],
+        ['first_name' => 'Alice', 'last_name' => 'Jones', 'status' => 'confirmed'],
+        ['first_name' => 'Mia', 'last_name' => 'Clark', 'status' => 'cancelled'],
+    ])->map(function (array $details, int $index) use ($event, $form) {
+        $email = strtolower($details['first_name']).'@example.com';
+        $attendee = Attendee::create([
+            'first_name' => $details['first_name'],
+            'last_name' => $details['last_name'],
+            'email' => $email,
+            'email_normalized' => $email,
+        ]);
+
+        return $event->registrations()->create([
+            'registration_form_id' => $form->id,
+            'attendee_id' => $attendee->id,
+            'registration_code' => 'REG-'.str_pad((string) ($index + 1), 8, '0', STR_PAD_LEFT),
+            'status' => $details['status'],
+            'source' => 'public_form',
+            'registered_at' => now()->addSeconds($index),
+            'confirmed_at' => $details['status'] === 'confirmed' ? now() : null,
+        ]);
+    });
+
+    $registrations[1]->checkIns()->create([
+        'checked_in_by' => $owner->id,
+        'checked_in_at' => now(),
+        'gate' => 'Main gate',
+        'result' => 'accepted',
+    ]);
+
+    $url = '/api/events/'.$event->slug.'/registrations';
+
+    $this->getJson($url.'?per_page=2&sort_by=name&sort_direction=asc')
+        ->assertOk()
+        ->assertJsonPath('total', 3)
+        ->assertJsonPath('all_total', 3)
+        ->assertJsonPath('current_page', 1)
+        ->assertJsonCount(2, 'data')
+        ->assertJsonPath('data.0.attendee.first_name', 'Alice')
+        ->assertJsonPath('data.1.attendee.first_name', 'Mia');
+
+    $this->getJson($url.'?per_page=2&sort_by=name&sort_direction=asc&page=2')
+        ->assertOk()
+        ->assertJsonPath('current_page', 2)
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.attendee.first_name', 'Noah');
+
+    $this->getJson($url.'?search=Alice%20Jones&status=confirmed&check_in=checked_in')
+        ->assertOk()
+        ->assertJsonPath('total', 1)
+        ->assertJsonPath('data.0.attendee.email', 'alice@example.com');
+
+    $this->getJson($url.'?check_in=not_checked_in&status=cancelled')
+        ->assertOk()
+        ->assertJsonPath('total', 1)
+        ->assertJsonPath('data.0.attendee.first_name', 'Mia');
+});
+
 test('a user cannot export another owners event registrations', function () {
     $owner = User::factory()->create();
     $otherUser = User::factory()->create();

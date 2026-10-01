@@ -19,6 +19,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class EventController extends Controller
 {
@@ -153,12 +154,64 @@ class EventController extends Controller
     {
         $this->ensureOwner($request, $event);
 
-        $registrations = $event->registrations()
-            ->with(['attendee', 'answers.field', 'checkIns'])
-            ->latest('registered_at')
-            ->paginate(50);
+        $filters = $request->validate([
+            'search' => ['sometimes', 'string', 'max:120'],
+            'status' => ['sometimes', Rule::in(['confirmed', 'cancelled', 'rejected'])],
+            'check_in' => ['sometimes', Rule::in(['checked_in', 'not_checked_in'])],
+            'sort_by' => ['sometimes', Rule::in(['registered_at', 'name', 'status'])],
+            'sort_direction' => ['sometimes', Rule::in(['asc', 'desc'])],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
 
-        return response()->json($registrations);
+        $query = $event->registrations()
+            ->with(['attendee', 'answers.field', 'checkIns'])
+            ->when(isset($filters['status']), fn ($query) => $query->where('registrations.status', $filters['status']))
+            ->when(isset($filters['check_in']), function ($query) use ($filters): void {
+                $acceptedCheckIn = fn ($checkIns) => $checkIns->where('result', 'accepted');
+
+                if ($filters['check_in'] === 'checked_in') {
+                    $query->whereHas('checkIns', $acceptedCheckIn);
+                } else {
+                    $query->whereDoesntHave('checkIns', $acceptedCheckIn);
+                }
+            })
+            ->when(! empty($filters['search']), function ($query) use ($filters): void {
+                $terms = preg_split('/\s+/', trim($filters['search']), -1, PREG_SPLIT_NO_EMPTY);
+
+                foreach ($terms as $term) {
+                    $query->where(function ($query) use ($term): void {
+                        $query->where('registrations.registration_code', 'like', "%{$term}%")
+                            ->orWhereHas('attendee', function ($attendeeQuery) use ($term): void {
+                                $attendeeQuery
+                                    ->where('first_name', 'like', "%{$term}%")
+                                    ->orWhere('last_name', 'like', "%{$term}%")
+                                    ->orWhere('email', 'like', "%{$term}%");
+                            });
+                    });
+                }
+            });
+
+        $sortBy = $filters['sort_by'] ?? 'registered_at';
+        $sortDirection = $filters['sort_direction'] ?? 'desc';
+
+        if ($sortBy === 'name') {
+            $query->leftJoin('attendees as registration_attendees', 'registration_attendees.id', '=', 'registrations.attendee_id')
+                ->select('registrations.*')
+                ->orderBy('registration_attendees.first_name', $sortDirection)
+                ->orderBy('registration_attendees.last_name', $sortDirection);
+        } else {
+            $query->orderBy("registrations.{$sortBy}", $sortDirection);
+        }
+
+        $registrations = $query
+            ->orderBy('registrations.id', $sortDirection)
+            ->paginate((int) ($filters['per_page'] ?? 50));
+
+        return response()->json([
+            ...$registrations->toArray(),
+            'all_total' => $event->registrations()->count(),
+        ]);
     }
 
     public function registrationExport(Request $request, Event $event): JsonResponse
