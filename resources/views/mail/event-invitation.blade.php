@@ -24,7 +24,6 @@
 
             <p style="margin:20px 0 6px;color:#6f625b;font-size:12px;">If the button does not work, open this registration link:</p>
             <a href="{{ $registrationUrl }}" style="color:#dc4f0a;font-size:12px;word-break:break-all;">{{ $registrationUrl }}</a>
-            <p style="margin:16px 0 0;color:#6f625b;font-size:12px;">The registration QR is also attached in case your email application blocks inline images.</p>
         </div>
     </div>
 </body>

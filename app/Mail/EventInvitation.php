@@ -5,7 +5,6 @@ namespace App\Mail;
 use App\Models\Event;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
-use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
@@ -32,16 +31,5 @@ class EventInvitation extends Mailable
         return new Content(
             view: 'mail.event-invitation',
         );
-    }
-
-    /**
-     * @return array<int, Attachment>
-     */
-    public function attachments(): array
-    {
-        return [
-            Attachment::fromData(fn (): string => $this->qrPng, 'event-registration-qr.png')
-                ->withMime('image/png'),
-        ];
     }
 }
