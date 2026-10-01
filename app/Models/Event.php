@@ -27,6 +27,7 @@ class Event extends Model
         'timezone',
         'registration_opens_at',
         'registration_closes_at',
+        'registration_is_open',
         'status',
     ];
 
@@ -37,6 +38,7 @@ class Event extends Model
             'ends_at' => 'datetime',
             'registration_opens_at' => 'datetime',
             'registration_closes_at' => 'datetime',
+            'registration_is_open' => 'boolean',
         ];
     }
 

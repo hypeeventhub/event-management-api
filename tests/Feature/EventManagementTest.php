@@ -114,6 +114,32 @@ test('a guest can register and the owner can retrieve the attendee', function ()
         ->assertJsonPath('data.0.attendee.last_name', 'Rivera');
 });
 
+test('an event owner can close and reopen registration and closed forms reject submissions', function () {
+    $owner = User::factory()->create();
+    $event = Event::findOrFail(
+        $this->actingAs($owner)->postJson('/api/events', eventPayload())->json('data.id'),
+    );
+    $registrationUrl = '/api/registration/events/'.$event->slug;
+
+    $this->patchJson('/api/events/'.$event->slug.'/registration', ['is_open' => false])
+        ->assertOk()
+        ->assertJsonPath('data.registration_is_open', false)
+        ->assertJsonPath('message', 'Event registration is now closed.');
+
+    $this->getJson($registrationUrl)
+        ->assertOk()
+        ->assertJsonPath('data.registration_is_open', false);
+
+    $this->postJson($registrationUrl, ['answers' => []])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('event');
+
+    $this->patchJson('/api/events/'.$event->slug.'/registration', ['is_open' => true])
+        ->assertOk()
+        ->assertJsonPath('data.registration_is_open', true)
+        ->assertJsonPath('message', 'Event registration is now open.');
+});
+
 test('a registered attendee queues an email containing their qr pass', function () {
     Mail::fake();
     $user = User::factory()->create();

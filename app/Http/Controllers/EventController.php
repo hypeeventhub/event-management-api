@@ -150,6 +150,23 @@ class EventController extends Controller
         ]);
     }
 
+    public function updateRegistrationAvailability(Request $request, Event $event): JsonResponse
+    {
+        $this->ensureOwner($request, $event);
+        $validated = $request->validate([
+            'is_open' => ['required', 'boolean'],
+        ]);
+
+        $event->update(['registration_is_open' => $validated['is_open']]);
+
+        return response()->json([
+            'data' => $this->loadEvent($event->refresh()),
+            'message' => $event->registration_is_open
+                ? 'Event registration is now open.'
+                : 'Event registration is now closed.',
+        ]);
+    }
+
     public function registrations(Request $request, Event $event): JsonResponse
     {
         $this->ensureOwner($request, $event);

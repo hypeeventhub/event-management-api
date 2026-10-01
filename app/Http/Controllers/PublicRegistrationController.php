@@ -31,6 +31,10 @@ class PublicRegistrationController extends Controller
     {
         abort_unless(in_array($event->status, ['published', 'live'], true), 404);
 
+        if (! $event->registration_is_open) {
+            throw ValidationException::withMessages(['event' => 'Registration for this event is closed.']);
+        }
+
         $form = $event->activeRegistrationForm()->with('fields.options')->firstOrFail();
         $rules = ['answers' => ['required', 'array']];
 
@@ -67,6 +71,11 @@ class PublicRegistrationController extends Controller
 
         $registration = DB::transaction(function () use ($event, $form, $answers, $email, $firstName, $lastName): Registration {
             $lockedEvent = Event::query()->lockForUpdate()->findOrFail($event->id);
+
+            if (! $lockedEvent->registration_is_open) {
+                throw ValidationException::withMessages(['event' => 'Registration for this event is closed.']);
+            }
+
             $registrationCount = $lockedEvent->registrations()
                 ->whereNotIn('status', ['cancelled', 'rejected'])
                 ->count();
