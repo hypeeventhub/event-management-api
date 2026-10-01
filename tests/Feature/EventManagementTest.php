@@ -114,7 +114,7 @@ test('a guest can register and the owner can retrieve the attendee', function ()
         ->assertJsonPath('data.0.attendee.last_name', 'Rivera');
 });
 
-test('a registered attendee receives an email containing their qr pass', function () {
+test('a registered attendee queues an email containing their qr pass', function () {
     Mail::fake();
     $user = User::factory()->create();
     $event = Event::findOrFail(
@@ -131,25 +131,25 @@ test('a registered attendee receives an email containing their qr pass', functio
             'work-email' => 'jamie@example.com',
             'meal' => $mealValue,
         ],
-    ])->assertCreated()->assertJsonPath('email_sent', true);
+    ])->assertCreated()->assertJsonPath('email_queued', true);
 
     $registrationCode = $response->json('data.registration_code');
 
-    Mail::assertSent(RegistrationConfirmation::class, function (RegistrationConfirmation $mail) use ($event, $registrationCode): bool {
+    Mail::assertQueued(RegistrationConfirmation::class, function (RegistrationConfirmation $mail) use ($event, $registrationCode): bool {
         $mail->assertHasTo('jamie@example.com');
         $mail->assertHasSubject('Your QR pass: '.$event->title);
         $mail->assertSeeInHtml('Jamie Rivera');
         $mail->assertSeeInHtml($registrationCode);
-        $mail->assertHasAttachedData($mail->qrPng, 'attendee-qr-pass.png', ['mime' => 'image/png']);
+        $mail->assertHasAttachedData($mail->qrPng(), 'attendee-qr-pass.png', ['mime' => 'image/png']);
 
         expect($mail->registration->registration_code)->toBe($registrationCode)
-            ->and(substr($mail->qrPng, 0, 8))->toBe("\x89PNG\r\n\x1a\n");
+            ->and(substr($mail->qrPng(), 0, 8))->toBe("\x89PNG\r\n\x1a\n");
 
         return true;
     });
 });
 
-test('a mail delivery failure does not discard the registration or qr code', function () {
+test('a mail queue failure does not discard the registration or qr code', function () {
     Mail::shouldReceive('to')->once()->with('jamie@example.com')->andThrow(new RuntimeException('Mail transport unavailable'));
     $user = User::factory()->create();
     $event = Event::findOrFail(
@@ -170,8 +170,8 @@ test('a mail delivery failure does not discard the registration or qr code', fun
 
     $response
         ->assertCreated()
-        ->assertJsonPath('email_sent', false)
-        ->assertJsonPath('message', 'Registration completed, but the QR email could not be delivered. Download your QR pass now.');
+        ->assertJsonPath('email_queued', false)
+        ->assertJsonPath('message', 'Registration completed, but the QR email could not be queued. Download your QR pass now.');
 
     expect($response->json('data.registration_code'))->toStartWith('REG-');
     $this->assertDatabaseHas('registrations', [

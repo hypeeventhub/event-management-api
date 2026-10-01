@@ -6,12 +6,13 @@
     "keywords": ["laravel", "framework"],
     "license": "MIT",
     "require": {
-        "ext-gd": "*",
         "php": "^8.2",
+        "ext-gd": "*",
         "endroid/qr-code": "^5.1",
         "laravel/framework": "^12.0",
         "laravel/sanctum": "^4.0",
-        "laravel/tinker": "^2.10.1"
+        "laravel/tinker": "^2.10.1",
+        "resend/resend-php": "^1.16"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

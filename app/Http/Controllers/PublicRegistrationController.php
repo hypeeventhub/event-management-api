@@ -6,11 +6,6 @@ use App\Mail\RegistrationConfirmation;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\Registration;
-use Endroid\QrCode\Builder\Builder;
-use Endroid\QrCode\Encoding\Encoding;
-use Endroid\QrCode\ErrorCorrectionLevel;
-use Endroid\QrCode\RoundBlockSizeMode;
-use Endroid\QrCode\Writer\PngWriter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -111,25 +106,14 @@ class PublicRegistrationController extends Controller
         });
 
         $registration->load(['attendee', 'event', 'answers.field']);
-        $emailSent = false;
+        $emailQueued = false;
 
         try {
-            $qrPng = Builder::create()
-                ->writer(new PngWriter())
-                ->data($registration->registration_code)
-                ->encoding(new Encoding('ISO-8859-1'))
-                ->errorCorrectionLevel(ErrorCorrectionLevel::Medium)
-                ->size(300)
-                ->margin(12)
-                ->roundBlockSizeMode(RoundBlockSizeMode::Margin)
-                ->build()
-                ->getString();
-
             Mail::to($registration->attendee->email)
-                ->send(new RegistrationConfirmation($registration, $qrPng));
-            $emailSent = true;
+                ->queue(new RegistrationConfirmation($registration));
+            $emailQueued = true;
         } catch (\Throwable $exception) {
-            Log::warning('Registration QR email delivery failed.', [
+            Log::warning('Registration QR email could not be queued.', [
                 'registration_id' => $registration->id,
                 'exception' => $exception::class,
             ]);
@@ -137,10 +121,10 @@ class PublicRegistrationController extends Controller
 
         return response()->json([
             'data' => $registration,
-            'email_sent' => $emailSent,
-            'message' => $emailSent
-                ? 'Registration completed successfully. Your QR pass was emailed to you.'
-                : 'Registration completed, but the QR email could not be delivered. Download your QR pass now.',
+            'email_queued' => $emailQueued,
+            'message' => $emailQueued
+                ? 'Registration completed successfully. Your QR pass will be emailed shortly.'
+                : 'Registration completed, but the QR email could not be queued. Download your QR pass now.',
         ], 201);
     }
 
