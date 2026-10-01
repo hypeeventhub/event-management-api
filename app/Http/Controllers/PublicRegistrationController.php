@@ -106,25 +106,30 @@ class PublicRegistrationController extends Controller
         });
 
         $registration->load(['attendee', 'event', 'answers.field']);
+        $emailSendingDisabledForStaging = app()->environment('staging');
         $emailQueued = false;
 
-        try {
-            Mail::to($registration->attendee->email)
-                ->queue(new RegistrationConfirmation($registration));
-            $emailQueued = true;
-        } catch (\Throwable $exception) {
-            Log::warning('Registration QR email could not be queued.', [
-                'registration_id' => $registration->id,
-                'exception' => $exception::class,
-            ]);
+        if (! $emailSendingDisabledForStaging) {
+            try {
+                Mail::to($registration->attendee->email)
+                    ->queue(new RegistrationConfirmation($registration));
+                $emailQueued = true;
+            } catch (\Throwable $exception) {
+                Log::warning('Registration QR email could not be queued.', [
+                    'registration_id' => $registration->id,
+                    'exception' => $exception::class,
+                ]);
+            }
         }
 
         return response()->json([
             'data' => $registration,
             'email_queued' => $emailQueued,
-            'message' => $emailQueued
-                ? 'Registration completed successfully. Your QR pass will be emailed shortly.'
-                : 'Registration completed, but the QR email could not be queued. Download your QR pass now.',
+            'message' => $emailSendingDisabledForStaging
+                ? 'Registration completed. Email delivery is disabled in staging; download and save your QR pass.'
+                : ($emailQueued
+                    ? 'Registration completed successfully. Your QR pass will be emailed shortly.'
+                    : 'Registration completed, but the QR email could not be queued. Download your QR pass now.'),
         ], 201);
     }
 
