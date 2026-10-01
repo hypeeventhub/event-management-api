@@ -23,7 +23,6 @@
                 <div><strong style="color:#25170f;">Venue:</strong> {{ $registration->event->venue ?: 'Online event' }}</div>
             </div>
 
-            <p style="margin:20px 0 0;color:#6f625b;font-size:12px;">The QR image is also attached in case your email application blocks inline images.</p>
         </div>
     </div>
 </body>
