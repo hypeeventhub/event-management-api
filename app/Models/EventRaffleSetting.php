@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class EventRaffleSetting extends Model
 {
-    protected $fillable = ['event_id', 'remove_winners', 'speed', 'theme'];
+    protected $fillable = ['event_id', 'remove_winners', 'speed', 'theme', 'logo_path'];
 
     protected function casts(): array
     {

@@ -2,8 +2,10 @@
 
 use App\Models\Event;
 use App\Models\User;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 function raffleEvent(User $owner, string $slug = 'raffle-event'): Event
 {
@@ -30,6 +32,64 @@ test('owner saves and reloads a normalized event name pool', function () {
     $this->getJson("/api/events/{$event->slug}/raffle")->assertOk()
         ->assertJsonPath('data.settings.remove_winners', false)->assertJsonPath('data.settings.speed', 5)
         ->assertJsonPath('data.settings.theme', 'rose')->assertJsonCount(3, 'data.entries');
+});
+
+test('an event owner can upload and remove a local raffle logo', function () {
+    Storage::fake('public');
+    $owner = User::factory()->create();
+    $event = raffleEvent($owner);
+
+    $upload = $this->actingAs($owner)->post("/api/events/{$event->slug}/raffle/logo", [
+        'logo' => UploadedFile::fake()->image('brand.png', 400, 200),
+    ])->assertOk();
+
+    $logoPath = $upload->json('data.settings.logo_path');
+    expect($logoPath)->toStartWith("raffle-logos/{$event->id}/");
+    expect($upload->json('data.settings.logo_url'))->toContain('/storage/raffle-logos/');
+    Storage::disk('public')->assertExists($logoPath);
+    $this->assertDatabaseHas('event_raffle_settings', ['event_id' => $event->id, 'logo_path' => $logoPath]);
+    $this->actingAs($owner)->getJson("/api/events/{$event->slug}/raffle")
+        ->assertOk()
+        ->assertJsonPath('data.settings.logo_path', $logoPath)
+        ->assertJsonPath('data.settings.logo_url', $upload->json('data.settings.logo_url'));
+
+    $replacement = $this->actingAs($owner)->post("/api/events/{$event->slug}/raffle/logo", [
+        'logo' => UploadedFile::fake()->image('brand-new.png', 300, 150),
+    ])->assertOk()->json('data.settings.logo_path');
+    expect($replacement)->not->toBe($logoPath);
+    Storage::disk('public')->assertMissing($logoPath);
+    Storage::disk('public')->assertExists($replacement);
+
+    $this->actingAs($owner)->deleteJson("/api/events/{$event->slug}/raffle/logo")
+        ->assertOk()
+        ->assertJsonPath('data.settings.logo_url', null)
+        ->assertJsonPath('data.settings.logo_path', null);
+
+    Storage::disk('public')->assertMissing($replacement);
+    $this->assertDatabaseHas('event_raffle_settings', ['event_id' => $event->id, 'logo_path' => null]);
+});
+
+test('raffle logo uploads reject non-images and remain owner-only', function () {
+    Storage::fake('public');
+    $owner = User::factory()->create();
+    $otherAdmin = User::factory()->create();
+    $event = raffleEvent($owner);
+    $url = "/api/events/{$event->slug}/raffle/logo";
+
+    $this->actingAs($owner)->withHeader('Accept', 'application/json')->post($url, [
+        'logo' => UploadedFile::fake()->create('notes.txt', 2, 'text/plain'),
+    ])->assertUnprocessable()->assertJsonValidationErrors('logo');
+
+    $this->actingAs($owner)->withHeader('Accept', 'application/json')->post($url, [
+        'logo' => UploadedFile::fake()->image('large.png')->size(2049),
+    ])->assertUnprocessable()->assertJsonValidationErrors('logo');
+
+    $this->actingAs($otherAdmin)->post($url, [
+        'logo' => UploadedFile::fake()->image('brand.png'),
+    ])->assertNotFound();
+
+    $this->actingAs($otherAdmin)->deleteJson($url)->assertNotFound();
+    $this->assertDatabaseMissing('event_raffle_settings', ['event_id' => $event->id]);
 });
 
 test('scanner and another admin cannot access event raffle data', function () {

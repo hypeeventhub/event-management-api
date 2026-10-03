@@ -7,6 +7,7 @@ use App\Models\RaffleDraw;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class RaffleController extends Controller
@@ -58,6 +59,71 @@ class RaffleController extends Controller
 
             return response()->json(['data' => ['settings' => $this->settings($setting), 'entries' => $event->raffleEntries()->orderBy('position')->get(['id', 'name', 'position'])]]);
         });
+    }
+
+    public function uploadLogo(Request $request, Event $event): JsonResponse
+    {
+        $this->owner($request, $event);
+        $validated = $request->validate([
+            'logo' => ['required', 'image', 'mimes:png,jpg,jpeg,webp', 'max:2048'],
+        ]);
+
+        $disk = Storage::disk('public');
+        $path = $validated['logo']->store("raffle-logos/{$event->id}", 'public');
+
+        if (! $path) {
+            return response()->json(['message' => 'The logo could not be saved.'], 500);
+        }
+
+        try {
+            [$setting, $oldPath] = DB::transaction(function () use ($event, $path): array {
+                Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
+                $setting = $event->raffleSetting()->lockForUpdate()->first();
+                if (! $setting) {
+                    $setting = $event->raffleSetting()->create([
+                        'remove_winners' => true,
+                        'speed' => 3,
+                        'theme' => 'purple',
+                    ]);
+                }
+                $oldPath = $setting->logo_path;
+                $setting->update(['logo_path' => $path]);
+
+                return [$setting->refresh(), $oldPath];
+            });
+        } catch (\Throwable $exception) {
+            $disk->delete($path);
+            throw $exception;
+        }
+
+        $this->deleteLogo($oldPath, $event->id);
+
+        return response()->json(['data' => ['settings' => $this->settings($setting)]]);
+    }
+
+    public function removeLogo(Request $request, Event $event): JsonResponse
+    {
+        $this->owner($request, $event);
+
+        [$setting, $oldPath] = DB::transaction(function () use ($event): array {
+            Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
+            $setting = $event->raffleSetting()->lockForUpdate()->first();
+            if (! $setting) {
+                $setting = $event->raffleSetting()->create([
+                    'remove_winners' => true,
+                    'speed' => 3,
+                    'theme' => 'purple',
+                ]);
+            }
+            $oldPath = $setting->logo_path;
+            $setting->update(['logo_path' => null]);
+
+            return [$setting->refresh(), $oldPath];
+        });
+
+        $this->deleteLogo($oldPath, $event->id);
+
+        return response()->json(['data' => ['settings' => $this->settings($setting)]]);
     }
 
     public function store(Request $request, Event $event): JsonResponse
@@ -146,7 +212,20 @@ class RaffleController extends Controller
 
     private function settings($value): array
     {
-        return ['remove_winners' => $value->remove_winners, 'speed' => $value->speed, 'theme' => $value->theme];
+        return [
+            'remove_winners' => $value->remove_winners,
+            'speed' => $value->speed,
+            'theme' => $value->theme,
+            'logo_path' => $value->logo_path,
+            'logo_url' => $value->logo_path ? Storage::disk('public')->url($value->logo_path) : null,
+        ];
+    }
+
+    private function deleteLogo(?string $path, int $eventId): void
+    {
+        if ($path && str_starts_with($path, "raffle-logos/{$eventId}/")) {
+            Storage::disk('public')->delete($path);
+        }
     }
 
     private function drawData(RaffleDraw $draw): array

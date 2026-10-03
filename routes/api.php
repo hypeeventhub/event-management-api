@@ -58,6 +58,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/events/{event:slug}', [EventController::class, 'show']);
         Route::get('/events/{event:slug}/raffle', [RaffleController::class, 'show']);
         Route::put('/events/{event:slug}/raffle/settings', [RaffleController::class, 'updateSettings']);
+        Route::post('/events/{event:slug}/raffle/logo', [RaffleController::class, 'uploadLogo']);
+        Route::delete('/events/{event:slug}/raffle/logo', [RaffleController::class, 'removeLogo']);
         Route::post('/events/{event:slug}/raffle/draws', [RaffleController::class, 'store']);
         Route::post('/events/{event:slug}/raffle/draws/{draw}/confirm', [RaffleController::class, 'confirm']);
         Route::delete('/events/{event:slug}/raffle/draws/{draw}', [RaffleController::class, 'destroy']);
