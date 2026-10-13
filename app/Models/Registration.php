@@ -15,7 +15,12 @@ class Registration extends Model
 
     protected function casts(): array
     {
-        return ['registered_at' => 'datetime', 'confirmed_at' => 'datetime', 'cancelled_at' => 'datetime'];
+        return [
+            'registered_at' => 'datetime',
+            'confirmed_at' => 'datetime',
+            'cancelled_at' => 'datetime',
+            'has_voted' => 'boolean',
+        ];
     }
 
     public function event(): BelongsTo

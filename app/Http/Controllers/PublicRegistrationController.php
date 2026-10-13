@@ -6,8 +6,11 @@ use App\Mail\RegistrationConfirmation;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\Registration;
+use App\Support\RegistrationQrPassImage;
+use App\Support\RegistrationQrPassPdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -18,6 +21,32 @@ use Illuminate\Validation\ValidationException;
 
 class PublicRegistrationController extends Controller
 {
+    public function downloadQr(Registration $registration): Response
+    {
+        $eventName = Str::slug($registration->event->title) ?: 'event';
+        $event = $registration->event;
+        $attendee = $registration->attendee;
+        $eventDate = $event->starts_at
+            ->copy()
+            ->setTimezone($event->timezone)
+            ->format('M j, Y g:i A');
+        $pdf = RegistrationQrPassPdf::generate(
+            RegistrationQrPassImage::qrPng($registration->registration_code),
+            $event->title,
+            trim($attendee->first_name.' '.$attendee->last_name),
+            $registration->registration_code,
+            $eventDate,
+            $event->venue ?: 'Online event',
+        );
+
+        return response($pdf, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="'.$eventName.'-qr-pass.pdf"',
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
     public function show(Event $event): JsonResponse
     {
         abort_unless(in_array($event->status, ['published', 'live'], true), 404);
@@ -116,13 +145,11 @@ class PublicRegistrationController extends Controller
 
         $registration->load(['attendee', 'event', 'answers.field']);
         $emailSendingDisabledForStaging = app()->environment('staging');
-        $emailQueued = false;
 
         if (! $emailSendingDisabledForStaging) {
             try {
                 Mail::to($registration->attendee->email)
                     ->queue(new RegistrationConfirmation($registration));
-                $emailQueued = true;
             } catch (\Throwable $exception) {
                 Log::warning('Registration QR email could not be queued.', [
                     'registration_id' => $registration->id,
@@ -132,14 +159,8 @@ class PublicRegistrationController extends Controller
         }
 
         return response()->json([
-            'data' => $registration,
-            'email_queued' => $emailQueued,
-            'message' => $emailSendingDisabledForStaging
-                ? 'Registration completed. Email delivery is disabled in staging; download and save your QR pass.'
-                : ($emailQueued
-                    ? 'Registration completed successfully. Your QR pass will be emailed shortly.'
-                    : 'Registration completed, but the QR email could not be queued. Download your QR pass now.'),
-        ], 201);
+            'email' => $registration->attendee->email,
+        ], 200);
     }
 
     private function uniqueRegistrationCode(): string

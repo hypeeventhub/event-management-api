@@ -10,6 +10,7 @@ use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\URL;
 
 function eventPayload(): array
 {
@@ -100,8 +101,8 @@ test('a guest can register and the owner can retrieve the attendee', function ()
     ]);
 
     $registrationResponse
-        ->assertCreated()
-        ->assertJsonPath('data.attendee.email', 'jamie@example.com');
+        ->assertOk()
+        ->assertExactJson(['email' => 'jamie@example.com']);
 
     expect(Attendee::count())->toBe(1)
         ->and(Registration::count())->toBe(1);
@@ -112,6 +113,50 @@ test('a guest can register and the owner can retrieve the attendee', function ()
         ->assertOk()
         ->assertJsonPath('data.0.attendee.first_name', 'Jamie')
         ->assertJsonPath('data.0.attendee.last_name', 'Rivera');
+});
+
+test('the attendee list reports whether each registration has voted', function () {
+    $user = User::factory()->create();
+    $event = Event::findOrFail(
+        $this->actingAs($user)->postJson('/api/events', eventPayload())->json('data.id'),
+    );
+    $mealValue = $event->activeRegistrationForm()->firstOrFail()
+        ->fields()->where('key', 'meal')->firstOrFail()
+        ->options()->firstOrFail()->value;
+
+    $register = function (string $email) use ($event, $mealValue): int {
+        $response = $this->postJson('/api/registration/events/'.$event->slug, [
+            'answers' => [
+                'first-name' => 'Jamie',
+                'last-name' => 'Rivera',
+                'work-email' => $email,
+                'meal' => $mealValue,
+            ],
+        ])->assertOk()->assertExactJson(['email' => $email]);
+
+        return (int) Registration::query()
+            ->whereHas('attendee', fn ($query) => $query->where('email', $email))
+            ->value('id');
+    };
+
+    $votedRegistrationId = $register('voted@example.com');
+    $notVotedRegistrationId = $register('not-voted@example.com');
+    $subject = $event->votingSubjects()->create([
+        'slug' => 'test-voted-status',
+        'title' => 'Audience choice',
+        'status' => 'active',
+    ]);
+    $contestant = $subject->contestants()->create(['name' => 'Contestant One', 'display_order' => 1]);
+    Registration::findOrFail($votedRegistrationId)->votingVotes()->create([
+        'voting_subject_id' => $subject->id,
+        'voting_contestant_id' => $contestant->id,
+    ]);
+
+    $response = $this->actingAs($user)->getJson('/api/events/'.$event->slug.'/registrations')->assertOk();
+    $registrations = collect($response->json('data'))->keyBy('id');
+
+    expect($registrations[$votedRegistrationId]['has_voted'])->toBeTrue()
+        ->and($registrations[$notVotedRegistrationId]['has_voted'])->toBeFalse();
 });
 
 test('an event owner can close and reopen registration and closed forms reject submissions', function () {
@@ -150,29 +195,58 @@ test('a registered attendee queues an email containing their qr pass', function 
         ->fields()->where('key', 'meal')->firstOrFail()
         ->options()->firstOrFail()->value;
 
-    $response = $this->postJson('/api/registration/events/'.$event->slug, [
+    $this->postJson('/api/registration/events/'.$event->slug, [
         'answers' => [
             'first-name' => 'Jamie',
             'last-name' => 'Rivera',
             'work-email' => 'jamie@example.com',
             'meal' => $mealValue,
         ],
-    ])->assertCreated()->assertJsonPath('email_queued', true);
+    ])->assertOk()->assertExactJson(['email' => 'jamie@example.com']);
 
-    $registrationCode = $response->json('data.registration_code');
+    $registrationCode = Registration::query()
+        ->whereHas('attendee', fn ($query) => $query->where('email', 'jamie@example.com'))
+        ->value('registration_code');
 
     Mail::assertQueued(RegistrationConfirmation::class, function (RegistrationConfirmation $mail) use ($event, $registrationCode): bool {
         $mail->assertHasTo('jamie@example.com');
         $mail->assertHasSubject('Your QR pass: '.$event->title);
         $mail->assertSeeInHtml('Jamie Rivera');
         $mail->assertSeeInHtml($registrationCode);
-        $mail->assertHasAttachedData($mail->qrPng(), 'attendee-qr-pass.png', ['mime' => 'image/png']);
+        $mail->assertSeeInHtml('Download QR pass (PDF)');
+        $mail->assertSeeInHtml('Attendee registration QR code');
 
         expect($mail->registration->registration_code)->toBe($registrationCode)
             ->and(substr($mail->qrPng(), 0, 8))->toBe("\x89PNG\r\n\x1a\n");
 
         return true;
     });
+
+    $registration = Registration::query()
+        ->whereHas('attendee', fn ($query) => $query->where('email', 'jamie@example.com'))
+        ->firstOrFail();
+    $downloadResponse = $this->get((new RegistrationConfirmation($registration))->qrDownloadUrl());
+    $downloadResponse->assertOk()->assertHeader('Content-Type', 'application/pdf');
+    $downloadedPdf = $downloadResponse->getContent();
+    expect(substr($downloadedPdf, 0, 8))->toBe('%PDF-1.4')
+        ->and($downloadResponse->headers->get('Content-Disposition'))->toContain('.pdf')
+        ->and($downloadedPdf)->toContain($event->title)
+        ->toContain('Jamie Rivera')
+        ->toContain($registrationCode)
+        ->toContain('REGISTRATION CONFIRMED')
+        ->toContain('Date:')
+        ->toContain('Venue:')
+        ->toContain($event->venue ?: 'Online event');
+
+    preg_match('/startxref\n(\d+)/', $downloadedPdf, $xrefMatch);
+    expect(substr($downloadedPdf, (int) ($xrefMatch[1] ?? 0), 4))->toBe('xref');
+
+    $expiredUrl = URL::temporarySignedRoute(
+        'registrations.qr-download',
+        now()->subMinute(),
+        ['registration' => $registration->id],
+    );
+    $this->get($expiredUrl)->assertForbidden();
 });
 
 test('a mail queue failure does not discard the registration or qr code', function () {
@@ -195,13 +269,15 @@ test('a mail queue failure does not discard the registration or qr code', functi
     ]);
 
     $response
-        ->assertCreated()
-        ->assertJsonPath('email_queued', false)
-        ->assertJsonPath('message', 'Registration completed, but the QR email could not be queued. Download your QR pass now.');
+        ->assertOk()
+        ->assertExactJson(['email' => 'jamie@example.com']);
 
-    expect($response->json('data.registration_code'))->toStartWith('REG-');
+    $registration = Registration::query()
+        ->whereHas('attendee', fn ($query) => $query->where('email', 'jamie@example.com'))
+        ->firstOrFail();
+    expect($registration->registration_code)->toStartWith('REG-');
     $this->assertDatabaseHas('registrations', [
-        'registration_code' => $response->json('data.registration_code'),
+        'id' => $registration->id,
         'status' => 'confirmed',
     ]);
 });
@@ -213,7 +289,7 @@ test('an attendee cannot register for the same event twice', function () {
     );
     $payload = ['answers' => ['first-name' => 'Jamie', 'last-name' => 'Rivera', 'work-email' => 'jamie@example.com', 'meal' => 'regular-1']];
 
-    $this->postJson('/api/registration/events/'.$event->slug, $payload)->assertCreated();
+    $this->postJson('/api/registration/events/'.$event->slug, $payload)->assertOk();
     $this->postJson('/api/registration/events/'.$event->slug, $payload)
         ->assertUnprocessable()
         ->assertJsonValidationErrors('email');

@@ -3,17 +3,14 @@
 namespace App\Mail;
 
 use App\Models\Registration;
-use Endroid\QrCode\Builder\Builder;
-use Endroid\QrCode\Encoding\Encoding;
-use Endroid\QrCode\ErrorCorrectionLevel;
-use Endroid\QrCode\RoundBlockSizeMode;
-use Endroid\QrCode\Writer\PngWriter;
+use App\Support\RegistrationQrPassImage;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\URL;
 
 class RegistrationConfirmation extends Mailable implements ShouldQueue
 {
@@ -34,21 +31,24 @@ class RegistrationConfirmation extends Mailable implements ShouldQueue
     {
         return new Content(
             view: 'mail.registration-confirmation',
-            with: ['qrPng' => $this->qrPng()],
+            with: [
+                'qrPng' => $this->qrPng(),
+                'qrDownloadUrl' => $this->qrDownloadUrl(),
+            ],
         );
     }
 
     public function qrPng(): string
     {
-        return $this->qrPngCache ??= Builder::create()
-            ->writer(new PngWriter)
-            ->data($this->registration->registration_code)
-            ->encoding(new Encoding('ISO-8859-1'))
-            ->errorCorrectionLevel(ErrorCorrectionLevel::Medium)
-            ->size(300)
-            ->margin(12)
-            ->roundBlockSizeMode(RoundBlockSizeMode::Margin)
-            ->build()
-            ->getString();
+        return $this->qrPngCache ??= RegistrationQrPassImage::qrPng($this->registration->registration_code);
+    }
+
+    public function qrDownloadUrl(): string
+    {
+        return URL::temporarySignedRoute(
+            'registrations.qr-download',
+            now()->addDays(30),
+            ['registration' => $this->registration->getKey()],
+        );
     }
 }

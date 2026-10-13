@@ -20,6 +20,9 @@ Route::prefix('registration/events')->group(function () {
     Route::get('/{event:slug}', [PublicRegistrationController::class, 'show']);
     Route::post('/{event:slug}', [PublicRegistrationController::class, 'store']);
 });
+Route::get('/registrations/{registration}/qr-download', [PublicRegistrationController::class, 'downloadQr'])
+    ->middleware('signed')
+    ->name('registrations.qr-download');
 
 Route::get('/voting/{subject:slug}', [PublicVotingController::class, 'show'])
     ->withoutMiddleware(EnsureFrontendRequestsAreStateful::class)
