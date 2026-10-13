@@ -25,15 +25,15 @@
 
             <table role="presentation" align="center" width="190" cellpadding="0" cellspacing="0" style="width:100%;max-width:190px;margin:0 auto 16px;">
                 <tr>
-                    <td align="center" style="padding:0 0 12px;">
-                        <a href="{{ $qrDownloadUrl }}" style="display:block;border-radius:8px;background:#f6671e;padding:12px 10px;color:#ffffff;font-size:14px;font-weight:700;text-align:center;text-decoration:none;">Download QR pass (PDF)</a>
-                    </td>
-                </tr>
-                <tr>
                     <td align="center">
                         <div style="display:block;border-radius:10px;background:#fff4ee;padding:10px;color:#f6671e;font-family:monospace;font-size:18px;font-weight:700;text-align:center;overflow-wrap:anywhere;">
                             {{ $registration->registration_code }}
                         </div>
+                    </td>
+                </tr>
+                <tr>
+                    <td align="center" style="padding:0 0 12px;">
+                        <a href="{{ $qrDownloadUrl }}" style="display:block;border-radius:8px;background:#f6671e;padding:12px 10px;color:#ffffff;font-size:14px;font-weight:700;text-align:center;text-decoration:none;">Download QR pass (PDF)</a>
                     </td>
                 </tr>
             </table>
