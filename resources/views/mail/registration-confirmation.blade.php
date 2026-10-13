@@ -18,6 +18,7 @@
             <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#f6671e;">Registration confirmed</div>
             <h1 style="margin:10px 0 6px;font-size:26px;">{{ $registration->event->title }}</h1>
             <p style="margin:0 0 20px;color:#6f625b;">Hello {{ $registration->attendee->first_name }} {{ $registration->attendee->last_name }}, present this QR pass when you arrive.</p>
+            <p style="margin:0 0 20px;color:#6f625b;">Please download the QR and note the registration code for event purposes</p>
 
             <a href="{{ $qrDownloadUrl }}" style="display:block;color:#a8460d;text-decoration:none;">
                 <img src="{{ $message->embedData($qrPng, 'attendee-qr-pass-inline.png', 'image/png') }}" width="260" height="260" alt="Attendee registration QR code" style="display:block;margin:0 auto 16px;max-width:100%;height:auto;">
