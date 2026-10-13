@@ -69,6 +69,24 @@ test('an event owner can upload and remove a local raffle logo', function () {
     $this->assertDatabaseHas('event_raffle_settings', ['event_id' => $event->id, 'logo_path' => null]);
 });
 
+test('raffle logo uploads and urls use the configured object storage disk', function () {
+    Storage::fake('s3');
+    config(['filesystems.raffle_logo_disk' => 's3']);
+    $owner = User::factory()->create();
+    $event = raffleEvent($owner);
+
+    $upload = $this->actingAs($owner)->post("/api/events/{$event->slug}/raffle/logo", [
+        'logo' => UploadedFile::fake()->image('brand.png', 400, 200),
+    ])->assertOk();
+
+    $logoPath = $upload->json('data.settings.logo_path');
+    Storage::disk('s3')->assertExists($logoPath);
+    expect($upload->json('data.settings.logo_url'))->toBe(Storage::disk('s3')->url($logoPath));
+
+    $this->actingAs($owner)->deleteJson("/api/events/{$event->slug}/raffle/logo")->assertOk();
+    Storage::disk('s3')->assertMissing($logoPath);
+});
+
 test('raffle logo uploads reject non-images and remain owner-only', function () {
     Storage::fake('public');
     $owner = User::factory()->create();

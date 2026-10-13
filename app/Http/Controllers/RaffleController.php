@@ -68,8 +68,9 @@ class RaffleController extends Controller
             'logo' => ['required', 'image', 'mimes:png,jpg,jpeg,webp', 'max:2048'],
         ]);
 
-        $disk = Storage::disk('public');
-        $path = $validated['logo']->store("raffle-logos/{$event->id}", 'public');
+        $diskName = $this->logoDiskName();
+        $disk = Storage::disk($diskName);
+        $path = $validated['logo']->store("raffle-logos/{$event->id}", $diskName);
 
         if (! $path) {
             return response()->json(['message' => 'The logo could not be saved.'], 500);
@@ -217,14 +218,19 @@ class RaffleController extends Controller
             'speed' => $value->speed,
             'theme' => $value->theme,
             'logo_path' => $value->logo_path,
-            'logo_url' => $value->logo_path ? Storage::disk('public')->url($value->logo_path) : null,
+            'logo_url' => $value->logo_path ? Storage::disk($this->logoDiskName())->url($value->logo_path) : null,
         ];
+    }
+
+    private function logoDiskName(): string
+    {
+        return (string) config('filesystems.raffle_logo_disk', 'public');
     }
 
     private function deleteLogo(?string $path, int $eventId): void
     {
         if ($path && str_starts_with($path, "raffle-logos/{$eventId}/")) {
-            Storage::disk('public')->delete($path);
+            Storage::disk($this->logoDiskName())->delete($path);
         }
     }
 
