@@ -24,9 +24,9 @@
                 <img src="{{ $message->embedData($qrPng, 'attendee-qr-pass-inline.png', 'image/png') }}" width="260" height="260" alt="Attendee registration QR code" style="display:block;margin:0 auto 16px;max-width:100%;height:auto;">
             </a>
 
-            <table role="presentation" align="center" width="190" cellpadding="0" cellspacing="0" style="width:100%;max-width:190px;margin:28px auto;">
+            <table role="presentation" align="center" width="190" cellpadding="0" cellspacing="0" style="width:100%;max-width:190px;margin:0 auto 16px;">
                 <tr>
-                    <td align="center">
+                    <td align="center" style="padding:0 0 28px;">
                         <div style="display:block;border-radius:10px;background:#fff4ee;padding:10px;color:#f6671e;font-family:monospace;font-size:18px;font-weight:700;text-align:center;overflow-wrap:anywhere;">
                             {{ $registration->registration_code }}
                         </div>
