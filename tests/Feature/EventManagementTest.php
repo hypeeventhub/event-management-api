@@ -188,9 +188,12 @@ test('an event owner can close and reopen registration and closed forms reject s
 test('a registered attendee queues an email containing their qr pass', function () {
     Mail::fake();
     $user = User::factory()->create();
+    $payload = eventPayload();
+    $payload['qr_description'] = 'Bring this QR pass to the welcome desk.';
     $event = Event::findOrFail(
-        $this->actingAs($user)->postJson('/api/events', eventPayload())->json('data.id'),
+        $this->actingAs($user)->postJson('/api/events', $payload)->json('data.id'),
     );
+    expect($event->qr_description)->toBe('Bring this QR pass to the welcome desk.');
     $mealValue = $event->activeRegistrationForm()->firstOrFail()
         ->fields()->where('key', 'meal')->firstOrFail()
         ->options()->firstOrFail()->value;
@@ -215,6 +218,7 @@ test('a registered attendee queues an email containing their qr pass', function 
         $mail->assertSeeInHtml($registrationCode);
         $mail->assertSeeInHtml('Download QR pass (PDF)');
         $mail->assertSeeInHtml('Attendee registration QR code');
+        $mail->assertSeeInHtml('Bring this QR pass to the welcome desk.');
 
         expect($mail->registration->registration_code)->toBe($registrationCode)
             ->and(substr($mail->qrPng(), 0, 8))->toBe("\x89PNG\r\n\x1a\n");
@@ -236,10 +240,15 @@ test('a registered attendee queues an email containing their qr pass', function 
         ->toContain('REGISTRATION CONFIRMED')
         ->toContain('Date:')
         ->toContain('Venue:')
+        ->toContain('Bring this QR pass to the welcome desk.')
         ->toContain($event->venue ?: 'Online event');
 
     preg_match('/startxref\n(\d+)/', $downloadedPdf, $xrefMatch);
     expect(substr($downloadedPdf, (int) ($xrefMatch[1] ?? 0), 4))->toBe('xref');
+
+    $event->update(['qr_description' => null]);
+    (new RegistrationConfirmation($registration->fresh()))
+        ->assertSeeInHtml('Please download the QR and note the registration code for event purposes');
 
     $expiredUrl = URL::temporarySignedRoute(
         'registrations.qr-download',

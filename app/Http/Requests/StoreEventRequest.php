@@ -18,6 +18,7 @@ class StoreEventRequest extends FormRequest
         return [
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:10000'],
+            'qr_description' => ['nullable', 'string', 'max:10000'],
             'category' => ['nullable', 'string', 'max:100'],
             'capacity' => ['nullable', 'integer', 'min:1'],
             'venue' => ['nullable', 'string', 'max:500'],

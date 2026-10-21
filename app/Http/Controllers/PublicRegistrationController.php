@@ -37,6 +37,7 @@ class PublicRegistrationController extends Controller
             $registration->registration_code,
             $eventDate,
             $event->venue ?: 'Online event',
+            $event->qr_description,
         );
 
         return response($pdf, 200, [

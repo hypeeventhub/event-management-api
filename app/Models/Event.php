@@ -18,6 +18,7 @@ class Event extends Model
         'title',
         'slug',
         'description',
+        'qr_description',
         'category',
         'capacity',
         'venue',

@@ -9,7 +9,7 @@ class RegistrationQrPassPdf
 {
     private const PAGE_WIDTH = 595;
 
-    private const PAGE_HEIGHT = 580;
+    private const BASE_PAGE_HEIGHT = 580;
 
     public static function generate(
         string $qrPng,
@@ -18,6 +18,7 @@ class RegistrationQrPassPdf
         string $registrationCode,
         string $eventDate,
         string $venue,
+        ?string $qrDescription = null,
     ): string {
         $qrImage = imagecreatefromstring($qrPng);
 
@@ -36,11 +37,14 @@ class RegistrationQrPassPdf
             throw new RuntimeException('The registration QR image could not be compressed for the PDF.');
         }
 
-        $content = self::pageContent($eventTitle, $attendeeName, $registrationCode, $eventDate, $venue);
+        $descriptionLines = self::descriptionLines($qrDescription ?? '');
+        $extraHeight = count($descriptionLines) * 18;
+        $pageHeight = self::BASE_PAGE_HEIGHT + $extraHeight;
+        $content = self::pageContent($eventTitle, $attendeeName, $registrationCode, $eventDate, $venue, $descriptionLines, $extraHeight, $pageHeight);
         $objects = [
             1 => '<< /Type /Catalog /Pages 2 0 R >>',
             2 => '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-            3 => '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '.self::PAGE_WIDTH.' '.self::PAGE_HEIGHT.'] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> /XObject << /QR 6 0 R >> >> /Contents 7 0 R >>',
+            3 => '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '.self::PAGE_WIDTH.' '.$pageHeight.'] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> /XObject << /QR 6 0 R >> >> /Contents 7 0 R >>',
             4 => '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
             5 => '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>',
             6 => "<< /Type /XObject /Subtype /Image /Width {$qrWidth} /Height {$qrHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length ".strlen($compressedPixels)." >>\nstream\n{$compressedPixels}\nendstream",
@@ -56,12 +60,19 @@ class RegistrationQrPassPdf
         string $registrationCode,
         string $eventDate,
         string $venue,
+        array $descriptionLines,
+        int $extraHeight,
+        int $pageHeight,
     ): string {
         $ops = [];
-        $ops[] = 'q 1 0.871 0.808 RG 0.8 w 0.5 0.5 '.(self::PAGE_WIDTH - 1).' '.(self::PAGE_HEIGHT - 1).' re S Q';
-        $ops[] = self::centeredText('REGISTRATION CONFIRMED', 'F1', 12, 0.965, 0.404, 0.118, 541);
-        $ops[] = self::centeredText($eventTitle, 'F2', 26, 0.145, 0.090, 0.059, 497, 539);
-        $ops[] = self::centeredText('Hello '.$attendeeName.', present this QR pass when you arrive.', 'F1', 14, 0.435, 0.384, 0.357, 464, 539);
+        $ops[] = 'q 1 0.871 0.808 RG 0.8 w 0.5 0.5 '.(self::PAGE_WIDTH - 1).' '.($pageHeight - 1).' re S Q';
+        $ops[] = self::centeredText('REGISTRATION CONFIRMED', 'F1', 12, 0.965, 0.404, 0.118, 541 + $extraHeight);
+        $ops[] = self::centeredText($eventTitle, 'F2', 26, 0.145, 0.090, 0.059, 497 + $extraHeight, 539);
+        $ops[] = self::centeredText('Hello '.$attendeeName.', present this QR pass when you arrive.', 'F1', 14, 0.435, 0.384, 0.357, 464 + $extraHeight, 539);
+
+        foreach ($descriptionLines as $index => $line) {
+            $ops[] = self::centeredText($line, 'F1', 12, 0.435, 0.384, 0.357, 446 + $extraHeight - ($index * 18), 515);
+        }
 
         $qrSize = 236;
         $qrX = (self::PAGE_WIDTH - $qrSize) / 2;
@@ -83,6 +94,54 @@ class RegistrationQrPassPdf
         $ops[] = self::textAt($venue, 'F1', 14, 0.435, 0.384, 0.357, $venueValueX, 42);
 
         return implode("\n", $ops);
+    }
+
+    /** @return list<string> */
+    private static function descriptionLines(string $description): array
+    {
+        $lines = [];
+
+        foreach (preg_split('/\R/u', trim($description)) ?: [] as $paragraph) {
+            if (trim($paragraph) === '') {
+                if ($lines !== []) {
+                    $lines[] = '';
+                }
+
+                continue;
+            }
+
+            $line = '';
+
+            foreach (preg_split('/\s+/u', trim($paragraph), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
+                $candidate = $line === '' ? $word : $line.' '.$word;
+
+                if (self::textWidth(self::encodeText($candidate), 12, false) <= 515) {
+                    $line = $candidate;
+
+                    continue;
+                }
+
+                if ($line !== '') {
+                    $lines[] = $line;
+                    $line = '';
+                }
+
+                foreach (preg_split('//u', $word, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $character) {
+                    if ($line !== '' && self::textWidth(self::encodeText($line.$character), 12, false) > 515) {
+                        $lines[] = $line;
+                        $line = '';
+                    }
+
+                    $line .= $character;
+                }
+            }
+
+            if ($line !== '') {
+                $lines[] = $line;
+            }
+        }
+
+        return $lines;
     }
 
     private static function rgbPixels(GdImage $image): string

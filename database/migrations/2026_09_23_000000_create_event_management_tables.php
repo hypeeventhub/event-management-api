@@ -14,6 +14,7 @@ return new class extends Migration
             $table->string('title');
             $table->string('slug')->unique();
             $table->text('description')->nullable();
+            $table->text('qr_description')->nullable();
             $table->string('category')->nullable();
             $table->unsignedInteger('capacity')->nullable();
             $table->string('venue')->nullable();
