@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\AttendeeRegistered;
 use App\Mail\RegistrationConfirmation;
 use App\Models\Attendee;
 use App\Models\Event;
@@ -145,6 +146,7 @@ class PublicRegistrationController extends Controller
         });
 
         $registration->load(['attendee', 'event', 'answers.field']);
+        event(new AttendeeRegistered($registration));
         $emailSendingDisabledForStaging = app()->environment('staging');
 
         if (! $emailSendingDisabledForStaging) {

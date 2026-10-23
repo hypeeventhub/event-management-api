@@ -75,6 +75,21 @@ test('an active ballot exposes only its title and ordered contestant identifiers
     ]);
 });
 
+test('nomination rounds cannot use the public manual voting endpoints', function () {
+    $event = publicVotingEvent('nomination-mode');
+    $subject = publicVotingSubject($event, 'nomination-mode');
+    $subject->update(['mode' => 'nomination', 'top_n' => 2]);
+    $registration = publicVotingRegistration($event, 'REG-NOMINATION-MODE');
+    $contestant = $subject->contestants()->first();
+
+    $this->getJson("/api/voting/{$subject->slug}")->assertNotFound();
+    $this->postJson("/api/voting/{$subject->slug}/votes", [
+        'registration_code' => $registration->registration_code,
+        'contestant_id' => $contestant->id,
+    ])->assertNotFound();
+    expect($subject->votes()->count())->toBe(0);
+});
+
 test('draft closed and unknown ballots have identical public not found responses', function () {
     $event = publicVotingEvent();
     $draft = publicVotingSubject($event, 'draft', VotingSubject::STATUS_DRAFT);

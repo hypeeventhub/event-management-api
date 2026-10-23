@@ -87,10 +87,10 @@ test('owner sees exact ranked counts, two decimal percentages, and confirmed par
         'total_registrations' => 8,
         'participation_percentage' => 87.5,
         'contestants' => [
-            ['id' => $firstTie->id, 'name' => 'Blair', 'display_order' => 1, 'votes' => 2, 'percentage' => 28.57],
-            ['id' => $secondTie->id, 'name' => 'Casey', 'display_order' => 1, 'votes' => 2, 'percentage' => 28.57],
-            ['id' => $laterOrder->id, 'name' => 'Alex', 'display_order' => 2, 'votes' => 2, 'percentage' => 28.57],
-            ['id' => $last->id, 'name' => 'Dana', 'display_order' => 0, 'votes' => 1, 'percentage' => 14.29],
+            ['id' => $firstTie->id, 'name' => 'Blair', 'display_order' => 1, 'votes' => 2, 'rank' => 1, 'percentage' => 28.57],
+            ['id' => $secondTie->id, 'name' => 'Casey', 'display_order' => 1, 'votes' => 2, 'rank' => 1, 'percentage' => 28.57],
+            ['id' => $laterOrder->id, 'name' => 'Alex', 'display_order' => 2, 'votes' => 2, 'rank' => 1, 'percentage' => 28.57],
+            ['id' => $last->id, 'name' => 'Dana', 'display_order' => 0, 'votes' => 1, 'rank' => 4, 'percentage' => 14.29],
         ],
     ]);
 });

@@ -65,6 +65,40 @@ class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinute(10)->by($this->votingThrottleKey($identity));
         });
+
+        RateLimiter::for('public-nomination-lookup', function (Request $request): Limit {
+            return Limit::perMinute(60)->by($this->votingThrottleKey([
+                'nomination-lookup', $this->votingSubjectSlug($request), $request->ip(),
+            ]));
+        });
+
+        RateLimiter::for('public-nomination-submission', function (Request $request): Limit {
+            return Limit::perMinute(120)->by($this->votingThrottleKey([
+                'nomination-submit', $this->votingSubjectSlug($request), $request->ip(),
+            ]));
+        });
+
+        RateLimiter::for('public-nomination-registration', function (Request $request): Limit {
+            $slug = $this->votingSubjectSlug($request);
+            $code = $request->input('registration_code');
+            $normalizedCode = is_string($code) ? Str::upper(trim($code)) : null;
+            $registration = is_string($code) && mb_strlen($code) <= 255
+                ? DB::table('registrations')
+                    ->join('voting_subjects', 'voting_subjects.event_id', '=', 'registrations.event_id')
+                    ->where('voting_subjects.slug', $slug)
+                    ->where('voting_subjects.mode', 'nomination')
+                    ->where('voting_subjects.status', VotingSubject::STATUS_ACTIVE)
+                    ->where('registrations.status', 'confirmed')
+                    ->where('registrations.registration_code', $normalizedCode)
+                    ->first(['registrations.id', 'voting_subjects.id as subject_id'])
+                : null;
+
+            $identity = $registration
+                ? ['nomination-registration', $registration->subject_id, $registration->id]
+                : ['nomination-code', $slug, $normalizedCode];
+
+            return Limit::perMinute(10)->by($this->votingThrottleKey($identity));
+        });
     }
 
     private function votingSubjectSlug(Request $request): string

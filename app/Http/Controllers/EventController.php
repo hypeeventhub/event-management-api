@@ -8,6 +8,7 @@ use App\Models\EmailInvitation;
 use App\Models\Event;
 use App\Models\Registration;
 use App\Models\RegistrationForm;
+use App\Models\VotingVote;
 use Endroid\QrCode\Builder\Builder;
 use Endroid\QrCode\Encoding\Encoding;
 use Endroid\QrCode\ErrorCorrectionLevel;
@@ -226,9 +227,32 @@ class EventController extends Controller
             ->orderBy('registrations.id', $sortDirection)
             ->paginate((int) ($filters['per_page'] ?? 50));
 
+        $votingSubjects = $event->votingSubjects()
+            ->orderBy('id')
+            ->get(['id', 'title', 'mode', 'status']);
+        $votesByRegistration = VotingVote::query()
+            ->where('event_id', $event->id)
+            ->whereIn('registration_id', $registrations->getCollection()->modelKeys())
+            ->with('contestant:id,name')
+            ->get(['registration_id', 'voting_subject_id', 'voting_contestant_id'])
+            ->groupBy('registration_id');
+
+        $registrations->getCollection()->each(function (Registration $registration) use ($votesByRegistration): void {
+            $registration->setAttribute(
+                'voting_activity',
+                $votesByRegistration->get($registration->id, collect())
+                    ->map(fn (VotingVote $vote): array => [
+                        'subject_id' => $vote->voting_subject_id,
+                        'nominee_name' => $vote->contestant?->name,
+                    ])
+                    ->values(),
+            );
+        });
+
         return response()->json([
             ...$registrations->toArray(),
             'all_total' => $event->registrations()->count(),
+            'voting_subjects' => $votingSubjects,
         ]);
     }
 

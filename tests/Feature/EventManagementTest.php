@@ -151,12 +151,32 @@ test('the attendee list reports whether each registration has voted', function (
         'voting_subject_id' => $subject->id,
         'voting_contestant_id' => $contestant->id,
     ]);
+    $nomination = $event->votingSubjects()->create([
+        'slug' => 'test-nomination-activity',
+        'title' => 'Audience nominations',
+        'status' => 'closed',
+        'mode' => 'nomination',
+    ]);
+    $nominee = $nomination->contestants()->create(['name' => 'Jamie Rivera', 'display_order' => 1]);
+    Registration::findOrFail($votedRegistrationId)->votingVotes()->create([
+        'voting_subject_id' => $nomination->id,
+        'voting_contestant_id' => $nominee->id,
+    ]);
 
     $response = $this->actingAs($user)->getJson('/api/events/'.$event->slug.'/registrations')->assertOk();
     $registrations = collect($response->json('data'))->keyBy('id');
 
     expect($registrations[$votedRegistrationId]['has_voted'])->toBeTrue()
-        ->and($registrations[$notVotedRegistrationId]['has_voted'])->toBeFalse();
+        ->and($registrations[$votedRegistrationId]['voting_activity'])->toBe([
+            ['subject_id' => $subject->id, 'nominee_name' => 'Contestant One'],
+            ['subject_id' => $nomination->id, 'nominee_name' => 'Jamie Rivera'],
+        ])
+        ->and($registrations[$notVotedRegistrationId]['has_voted'])->toBeFalse()
+        ->and($registrations[$notVotedRegistrationId]['voting_activity'])->toBe([])
+        ->and($response->json('voting_subjects'))->toBe([
+            ['id' => $subject->id, 'title' => 'Audience choice', 'mode' => 'manual', 'status' => 'active'],
+            ['id' => $nomination->id, 'title' => 'Audience nominations', 'mode' => 'nomination', 'status' => 'closed'],
+        ]);
 });
 
 test('an event owner can close and reopen registration and closed forms reject submissions', function () {

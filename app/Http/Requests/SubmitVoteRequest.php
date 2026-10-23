@@ -12,7 +12,9 @@ class SubmitVoteRequest extends FormRequest
     {
         $subject = $this->route('subject');
 
-        if (! $subject instanceof VotingSubject || $subject->status !== VotingSubject::STATUS_ACTIVE) {
+        if (! $subject instanceof VotingSubject
+            || $subject->mode !== 'manual'
+            || $subject->status !== VotingSubject::STATUS_ACTIVE) {
             throw new HttpResponseException(response()->json(['message' => 'Not Found'], 404));
         }
 

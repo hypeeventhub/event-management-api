@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\VotingStatisticsUpdated;
 use App\Http\Requests\SubmitVoteRequest;
 use App\Models\VotingSubject;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -13,7 +14,7 @@ class PublicVotingController extends Controller
 {
     public function show(VotingSubject $subject): JsonResponse
     {
-        if ($subject->status !== VotingSubject::STATUS_ACTIVE) {
+        if ($subject->mode !== 'manual' || $subject->status !== VotingSubject::STATUS_ACTIVE) {
             return $this->notFound();
         }
 
@@ -35,7 +36,7 @@ class PublicVotingController extends Controller
         try {
             return DB::transaction(function () use ($subject, $validated, $code): JsonResponse {
                 $lockedSubject = VotingSubject::query()->whereKey($subject->id)->lockForUpdate()->first();
-                if (! $lockedSubject || $lockedSubject->status !== VotingSubject::STATUS_ACTIVE) {
+                if (! $lockedSubject || $lockedSubject->mode !== 'manual' || $lockedSubject->status !== VotingSubject::STATUS_ACTIVE) {
                     return $this->notFound();
                 }
 
@@ -57,6 +58,8 @@ class PublicVotingController extends Controller
                     'voting_contestant_id' => $contestant->id,
                     'registration_id' => $registration->id,
                 ]);
+
+                event(new VotingStatisticsUpdated($lockedSubject));
 
                 return response()->json(['message' => 'Your vote has been recorded.'], 201);
             });

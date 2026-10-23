@@ -8,11 +8,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class VotingContestant extends Model
 {
-    protected $fillable = ['voting_subject_id', 'name', 'display_order'];
+    protected $fillable = ['voting_subject_id', 'name', 'display_order', 'attendee_id'];
 
     public function subject(): BelongsTo
     {
         return $this->belongsTo(VotingSubject::class, 'voting_subject_id');
+    }
+
+    public function attendee(): BelongsTo
+    {
+        return $this->belongsTo(Attendee::class);
     }
 
     public function votes(): HasMany
