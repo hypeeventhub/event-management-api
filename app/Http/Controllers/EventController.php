@@ -54,6 +54,40 @@ class EventController extends Controller
         ]);
     }
 
+    public function history(Request $request): JsonResponse
+    {
+        $filters = $request->validate([
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
+        $events = Event::query()
+            ->where('created_by', $request->user()->id)
+            ->where('ends_at', '<', now())
+            ->select(['id', 'slug', 'title', 'venue', 'meeting_url', 'capacity', 'starts_at', 'ends_at', 'timezone'])
+            ->orderByDesc('ends_at')
+            ->orderByDesc('id')
+            ->paginate((int) ($filters['per_page'] ?? 25));
+
+        return response()->json([
+            'data' => $events->getCollection()->map(fn (Event $event): array => [
+                'slug' => $event->slug,
+                'title' => $event->title,
+                'location' => $event->venue ?: ($event->meeting_url ? 'Online event' : 'Venue pending'),
+                'capacity' => $event->capacity,
+                'starts_at' => $event->starts_at,
+                'ends_at' => $event->ends_at,
+                'timezone' => $event->timezone,
+            ])->values(),
+            'meta' => [
+                'current_page' => $events->currentPage(),
+                'last_page' => $events->lastPage(),
+                'per_page' => $events->perPage(),
+                'total' => $events->total(),
+            ],
+        ]);
+    }
+
     public function scannerEvents(Request $request): JsonResponse
     {
         $now = now();
@@ -124,6 +158,16 @@ class EventController extends Controller
         $this->ensureOwner($request, $event);
 
         return response()->json(['data' => $this->loadEvent($event)]);
+    }
+
+    public function destroy(Request $request, Event $event): JsonResponse
+    {
+        $this->ensureOwner($request, $event);
+        abort_unless($event->starts_at?->isFuture() ?? false, 422, 'Only upcoming events can be deleted.');
+
+        $event->delete();
+
+        return response()->json(['message' => 'Event deleted successfully.']);
     }
 
     public function update(StoreEventRequest $request, Event $event): JsonResponse

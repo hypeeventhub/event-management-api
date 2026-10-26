@@ -189,6 +189,7 @@ test('nomination creation validates title and top N only and rejects the obsolet
     $this->assertDatabaseCount('voting_subjects', 0);
 });
 
+
 test('draft edits only update title and top N and preserve nominees already submitted', function () {
     $event = nominationManagementEvent();
     $subject = nominationManagementSubject($event);

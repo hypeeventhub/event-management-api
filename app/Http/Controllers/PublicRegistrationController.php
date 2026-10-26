@@ -53,8 +53,16 @@ class PublicRegistrationController extends Controller
     {
         abort_unless(in_array($event->status, ['published', 'live'], true), 404);
 
+        $event->load(['activeRegistrationForm.fields.options']);
+        $form = $event->activeRegistrationForm;
+        if ($form) {
+            $form->setRelation('fields', $form->fields
+                ->reject(fn ($field) => $field->system_key === 'gender')
+                ->values());
+        }
+
         return response()->json([
-            'data' => $event->load(['activeRegistrationForm.fields.options']),
+            'data' => $event,
         ]);
     }
 
@@ -67,9 +75,10 @@ class PublicRegistrationController extends Controller
         }
 
         $form = $event->activeRegistrationForm()->with('fields.options')->firstOrFail();
+        $fields = $form->fields->reject(fn ($field) => $field->system_key === 'gender')->values();
         $rules = ['answers' => ['required', 'array']];
 
-        foreach ($form->fields as $field) {
+        foreach ($fields as $field) {
             $key = 'answers.'.$field->key;
             $fieldRules = $field->is_required ? ['required'] : ['nullable'];
 
@@ -100,7 +109,7 @@ class PublicRegistrationController extends Controller
             throw ValidationException::withMessages([$emailField->key => 'A valid email address is required.']);
         }
 
-        $registration = DB::transaction(function () use ($event, $form, $answers, $email, $firstName, $lastName): Registration {
+        $registration = DB::transaction(function () use ($event, $form, $fields, $answers, $email, $firstName, $lastName): Registration {
             $lockedEvent = Event::query()->lockForUpdate()->findOrFail($event->id);
 
             if (! $lockedEvent->registration_is_open) {
@@ -135,7 +144,7 @@ class PublicRegistrationController extends Controller
                 'confirmed_at' => now(),
             ]);
 
-            foreach ($form->fields as $field) {
+            foreach ($fields as $field) {
                 $registration->answers()->create([
                     'form_field_id' => $field->id,
                     'answer' => $answers[$field->key] ?? null,

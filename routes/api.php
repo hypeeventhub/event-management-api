@@ -64,7 +64,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('role:Admin')->group(function () {
         Route::apiResource('users', UserController::class)->except(['show']);
         Route::get('/events', [EventController::class, 'index']);
+        Route::get('/events/history', [EventController::class, 'history']);
         Route::post('/events', [EventController::class, 'store']);
+        Route::delete('/events/{event:slug}', [EventController::class, 'destroy']);
         Route::get('/events/{event:slug}/nomination-candidates', [NominationController::class, 'candidates']);
         Route::post('/events/{event:slug}/nominations', [NominationController::class, 'store']);
         Route::patch('/events/{event:slug}/nominations/{subject:slug}', [NominationController::class, 'update'])->withoutScopedBindings();

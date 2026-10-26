@@ -83,6 +83,86 @@ test('an authenticated user can publish an event with a registration form', func
     $this->assertDatabaseCount('field_options', 2);
 });
 
+test('event history returns only the owner’s ended events in reverse chronological order with pagination', function () {
+    $owner = User::factory()->create();
+    $otherOwner = User::factory()->create();
+    $createEvent = function (User $creator, string $title, $endsAt, array $extra = []): Event {
+        return Event::create([
+            'created_by' => $creator->id,
+            'title' => $title,
+            'slug' => hash('sha256', $title),
+            'venue' => $extra['venue'] ?? null,
+            'meeting_url' => $extra['meeting_url'] ?? null,
+            'capacity' => array_key_exists('capacity', $extra) ? $extra['capacity'] : 200,
+            'starts_at' => Carbon::parse($endsAt)->subHours(2),
+            'ends_at' => Carbon::parse($endsAt),
+            'timezone' => 'Asia/Manila',
+            'status' => $extra['status'] ?? 'published',
+        ]);
+    };
+
+    $older = $createEvent($owner, 'Older Past Event', now()->subDays(3), ['venue' => 'Old Hall', 'capacity' => 150]);
+    $newer = $createEvent($owner, 'Recent Past Online Event', now()->subDay(), ['meeting_url' => 'https://meeting.example/private', 'capacity' => null, 'status' => 'cancelled']);
+    $createEvent($owner, 'Still Ongoing Event', now()->addHour());
+    $createEvent($owner, 'Future Event', now()->addDays(3));
+    $createEvent($otherOwner, 'Another Owner Past Event', now()->subDay());
+
+    $this->actingAs($owner)->getJson('/api/events/history?per_page=1&page=1')
+        ->assertOk()
+        ->assertJsonPath('meta.total', 2)
+        ->assertJsonPath('meta.current_page', 1)
+        ->assertJsonPath('meta.last_page', 2)
+        ->assertJsonPath('data.0.slug', $newer->slug)
+        ->assertJsonPath('data.0.title', 'Recent Past Online Event')
+        ->assertJsonPath('data.0.location', 'Online event')
+        ->assertJsonPath('data.0.capacity', null)
+        ->assertJsonMissing(['meeting_url' => 'https://meeting.example/private']);
+
+    $this->getJson('/api/events/history?per_page=1&page=2')
+        ->assertOk()
+        ->assertJsonPath('data.0.slug', $older->slug)
+        ->assertJsonPath('data.0.location', 'Old Hall')
+        ->assertJsonPath('data.0.capacity', 150);
+
+    $this->actingAs(User::factory()->scanner()->create())->getJson('/api/events/history')->assertForbidden();
+});
+
+test('an event owner can soft delete an upcoming event while other users cannot', function () {
+    $owner = User::factory()->create();
+    $otherAdmin = User::factory()->create();
+    $eventResponse = $this->actingAs($owner)->postJson('/api/events', eventPayload())->assertCreated();
+    $event = Event::findOrFail($eventResponse->json('data.id'));
+
+    $this->actingAs($otherAdmin)->deleteJson("/api/events/{$event->slug}")->assertNotFound();
+    $this->actingAs(User::factory()->scanner()->create())->deleteJson("/api/events/{$event->slug}")->assertForbidden();
+    $this->assertDatabaseHas('events', ['id' => $event->id, 'deleted_at' => null]);
+
+    $this->actingAs($owner)
+        ->deleteJson("/api/events/{$event->slug}")
+        ->assertOk()
+        ->assertJsonPath('message', 'Event deleted successfully.');
+
+    $this->assertSoftDeleted('events', ['id' => $event->id]);
+    $this->actingAs($owner)->getJson('/api/events')->assertOk()->assertJsonCount(0, 'data');
+});
+
+test('an admin cannot delete an event after it has started', function () {
+    $owner = User::factory()->create();
+    $eventResponse = $this->actingAs($owner)->postJson('/api/events', [
+        ...eventPayload(),
+        'starts_at' => now()->subMinute()->toIso8601String(),
+        'ends_at' => now()->addHours(2)->toIso8601String(),
+    ])->assertCreated();
+    $event = Event::findOrFail($eventResponse->json('data.id'));
+
+    $this->actingAs($owner)
+        ->deleteJson("/api/events/{$event->slug}")
+        ->assertUnprocessable()
+        ->assertJsonPath('message', 'Only upcoming events can be deleted.');
+
+    $this->assertDatabaseHas('events', ['id' => $event->id, 'deleted_at' => null]);
+});
+
 test('a guest can register and the owner can retrieve the attendee', function () {
     $user = User::factory()->create();
     $eventResponse = $this->actingAs($user)->postJson('/api/events', eventPayload())->assertCreated();
@@ -106,6 +186,7 @@ test('a guest can register and the owner can retrieve the attendee', function ()
 
     expect(Attendee::count())->toBe(1)
         ->and(Registration::count())->toBe(1);
+    $this->assertDatabaseHas('attendees', ['email_normalized' => 'jamie@example.com']);
     $this->assertDatabaseCount('registration_answers', 4);
 
     $this->actingAs($user)
@@ -651,7 +732,7 @@ test('an event owner can update an event and publish a new form version', functi
         ->assertOk()
         ->assertJsonPath('data.title', 'Updated Corporate Gala')
         ->assertJsonPath('data.active_registration_form.version', 2)
-        ->assertJsonCount(5, 'data.active_registration_form.fields');
+        ->assertJsonCount(6, 'data.active_registration_form.fields');
 
     expect($event->registrationForms()->count())->toBe(2)
         ->and($event->registrationForms()->where('is_active', true)->count())->toBe(1);

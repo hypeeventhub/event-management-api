@@ -90,6 +90,7 @@ test('public nominee search fuzzy-matches event attendees of any status without 
         ->assertOk()->assertExactJson(['data' => []]);
 });
 
+
 test('candidate search and nomination submission only work while an actual nomination is active', function () {
     $event = publicNominationEvent();
     $candidate = publicNominationRegistration($event, 'Jamie', 'Rivera');
