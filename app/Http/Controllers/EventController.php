@@ -19,8 +19,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class EventController extends Controller
 {
@@ -227,7 +229,7 @@ class EventController extends Controller
         ]);
 
         $query = $event->registrations()
-            ->with(['attendee', 'answers.field', 'checkIns'])
+            ->with(['attendee', 'answers.field.options', 'checkIns'])
             ->withExists(['votingVotes as has_voted'])
             ->when(isset($filters['status']), fn ($query) => $query->where('registrations.status', $filters['status']))
             ->when(isset($filters['check_in']), function ($query) use ($filters): void {
@@ -297,6 +299,98 @@ class EventController extends Controller
             ...$registrations->toArray(),
             'all_total' => $event->registrations()->count(),
             'voting_subjects' => $votingSubjects,
+        ]);
+    }
+
+    public function updateRegistrationAnswers(Request $request, Event $event, int $registrationId): JsonResponse
+    {
+        $this->ensureOwner($request, $event);
+
+        $registration = $event->registrations()
+            ->with(['attendee', 'answers.field.options'])
+            ->whereKey($registrationId)
+            ->firstOrFail();
+
+        $submitted = Validator::make($request->all(), [
+            'answers' => ['required', 'array'],
+            'answers.*.form_field_id' => ['required', 'integer', 'distinct'],
+            'answers.*.answer' => ['present'],
+        ])->validate()['answers'];
+
+        $editableAnswers = $registration->answers
+            ->filter(fn ($answer): bool => $answer->field?->system_key === null)
+            ->keyBy('form_field_id');
+        $submittedIds = collect($submitted)
+            ->pluck('form_field_id')
+            ->map(fn ($fieldId): int => (int) $fieldId)
+            ->sort()
+            ->values()
+            ->all();
+        $editableIds = $editableAnswers->keys()
+            ->map(fn ($fieldId): int => (int) $fieldId)
+            ->sort()
+            ->values()
+            ->all();
+
+        if ($submittedIds !== $editableIds) {
+            throw ValidationException::withMessages([
+                'answers' => 'Only the registration’s custom form answers can be updated, and all custom answers must be included.',
+            ]);
+        }
+
+        $rules = [
+            'answers.*.form_field_id' => ['required', 'integer', 'distinct'],
+        ];
+
+        foreach ($submitted as $index => $item) {
+            $savedAnswer = $editableAnswers->get((int) $item['form_field_id']);
+            $field = $savedAnswer->field;
+            $answerKey = "answers.$index.answer";
+            $fieldRules = [$field->is_required ? 'required' : 'nullable'];
+
+            switch ($field->type) {
+                case 'short':
+                    $fieldRules[] = 'string';
+                    $fieldRules[] = 'max:1000';
+                    break;
+                case 'paragraph':
+                    $fieldRules[] = 'string';
+                    $fieldRules[] = 'max:5000';
+                    break;
+                case 'date':
+                    $fieldRules[] = 'date_format:Y-m-d';
+                    break;
+                case 'multiple':
+                case 'dropdown':
+                    $fieldRules[] = 'string';
+                    $fieldRules[] = Rule::in($field->options->pluck('value')->all());
+                    break;
+                case 'checkboxes':
+                    $fieldRules[] = 'array';
+                    $rules[$answerKey.'.*'] = [Rule::in($field->options->pluck('value')->all())];
+                    break;
+                default:
+                    $fieldRules[] = 'prohibited';
+                    break;
+            }
+
+            $rules[$answerKey] = $fieldRules;
+        }
+
+        $validated = Validator::make(['answers' => $submitted], $rules)->validate();
+
+        $validatedAnswers = $validated['answers'] ?? [];
+
+        DB::transaction(function () use ($editableAnswers, $validatedAnswers): void {
+            foreach ($validatedAnswers as $item) {
+                $editableAnswers->get((int) $item['form_field_id'])
+                    ->update(['answer' => $item['answer']]);
+            }
+        });
+
+        return response()->json([
+            'data' => $registration->fresh()->load(['attendee', 'answers.field.options']),
+            'message' => 'Registration answers updated successfully.',
         ]);
     }
 

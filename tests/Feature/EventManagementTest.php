@@ -65,6 +65,104 @@ function eventPayload(): array
     ];
 }
 
+function registrationAnswerEditingFixture($test, User $owner): array
+{
+    $eventId = $test->actingAs($owner)
+        ->postJson('/api/events', eventPayload())
+        ->assertCreated()
+        ->json('data.id');
+    $event = Event::findOrFail($eventId);
+    $form = $event->activeRegistrationForm()->firstOrFail();
+
+    $customFields = [
+        [
+            'key' => 'attendee-story',
+            'type' => 'paragraph',
+            'label' => 'Tell us about yourself',
+            'is_required' => false,
+            'options' => [],
+        ],
+        [
+            'key' => 'visit-date',
+            'type' => 'date',
+            'label' => 'Visit date',
+            'is_required' => false,
+            'options' => [],
+        ],
+        [
+            'key' => 'sessions',
+            'type' => 'checkboxes',
+            'label' => 'Sessions',
+            'is_required' => false,
+            'options' => [
+                ['label' => 'Morning', 'value' => 'morning-1'],
+                ['label' => 'Evening', 'value' => 'evening-2'],
+            ],
+        ],
+    ];
+
+    foreach ($customFields as $position => $fieldData) {
+        $options = $fieldData['options'];
+        unset($fieldData['options']);
+        $field = $form->fields()->create([
+            ...$fieldData,
+            'registration_form_id' => $form->id,
+            'system_key' => null,
+            'description' => null,
+            'placeholder' => null,
+            'position' => 4 + $position,
+        ]);
+
+        foreach ($options as $optionPosition => $option) {
+            $field->options()->create([
+                ...$option,
+                'position' => $optionPosition,
+            ]);
+        }
+    }
+
+    $email = "jeremiah.{$owner->id}@example.com";
+    $attendee = Attendee::create([
+        'first_name' => 'Jeremiah',
+        'last_name' => 'Quintano',
+        'email' => $email,
+        'email_normalized' => $email,
+    ]);
+    $registration = $event->registrations()->create([
+        'registration_form_id' => $form->id,
+        'attendee_id' => $attendee->id,
+        'registration_code' => 'REG-ANSWERS-'.$owner->id,
+        'status' => 'confirmed',
+        'source' => 'public_form',
+        'registered_at' => now(),
+        'confirmed_at' => now(),
+    ]);
+    $answerValues = [
+        'last-name' => 'Quintano',
+        'first-name' => 'Jeremiah',
+        'work-email' => $email,
+        'meal' => 'regular-1',
+        'attendee-story' => 'Original answer',
+        'visit-date' => '2026-11-09',
+        'sessions' => ['morning-1'],
+    ];
+
+    foreach ($form->fields()->get() as $field) {
+        $registration->answers()->create([
+            'form_field_id' => $field->id,
+            'answer' => $answerValues[$field->key] ?? null,
+        ]);
+    }
+
+    return [
+        'event' => $event,
+        'form' => $form,
+        'registration' => $registration,
+        'attendee' => $attendee,
+        'fields' => $form->fields()->with('options')->get()->keyBy('key'),
+    ];
+}
+
 test('an authenticated user can publish an event with a registration form', function () {
     $user = User::factory()->create();
 
@@ -976,4 +1074,125 @@ test('a failed invitation delivery is recorded without its failure reason', func
         'email' => 'guest@example.com',
         'status' => 'failed',
     ]);
+});
+
+test('an event owner can update custom registration answers using saved field metadata', function () {
+    $owner = User::factory()->create();
+    $fixture = registrationAnswerEditingFixture($this, $owner);
+    $fields = $fixture['fields'];
+    $payload = [
+        'answers' => [
+            ['form_field_id' => $fields['meal']->id, 'answer' => 'vegetarian-2'],
+            ['form_field_id' => $fields['attendee-story']->id, 'answer' => 'Updated answer'],
+            ['form_field_id' => $fields['visit-date']->id, 'answer' => '2026-11-10'],
+            ['form_field_id' => $fields['sessions']->id, 'answer' => ['evening-2']],
+        ],
+    ];
+
+    $this->actingAs($owner)
+        ->getJson('/api/events/'.$fixture['event']->slug.'/registrations')
+        ->assertOk()
+        ->assertJsonFragment(['label' => 'Regular', 'value' => 'regular-1']);
+
+    $this->actingAs($owner)
+        ->patchJson('/api/events/'.$fixture['event']->slug.'/registrations/'.$fixture['registration']->id.'/answers', $payload)
+        ->assertOk()
+        ->assertJsonPath('data.id', $fixture['registration']->id)
+        ->assertJsonPath('data.attendee.first_name', 'Jeremiah')
+        ->assertJsonPath('data.attendee.email', $fixture['attendee']->email)
+        ->assertJsonFragment(['label' => 'Vegetarian', 'value' => 'vegetarian-2'])
+        ->assertJsonPath('message', 'Registration answers updated successfully.');
+
+    expect($fixture['registration']->answers()->where('form_field_id', $fields['meal']->id)->first()->answer)
+        ->toBe('vegetarian-2');
+    expect($fixture['registration']->answers()->where('form_field_id', $fields['attendee-story']->id)->first()->answer)
+        ->toBe('Updated answer');
+    expect($fixture['registration']->answers()->where('form_field_id', $fields['visit-date']->id)->first()->answer)
+        ->toBe('2026-11-10');
+    expect($fixture['registration']->answers()->where('form_field_id', $fields['sessions']->id)->first()->answer)
+        ->toBe(['evening-2']);
+    expect($fixture['attendee']->fresh()->only(['first_name', 'last_name', 'email']))
+        ->toBe(['first_name' => 'Jeremiah', 'last_name' => 'Quintano', 'email' => $fixture['attendee']->email]);
+});
+
+test('an event owner can save an empty optional checkbox answer', function () {
+    $owner = User::factory()->create();
+    $fixture = registrationAnswerEditingFixture($this, $owner);
+    $fields = $fixture['fields'];
+
+    $this->actingAs($owner)
+        ->patchJson('/api/events/'.$fixture['event']->slug.'/registrations/'.$fixture['registration']->id.'/answers', [
+            'answers' => [
+                ['form_field_id' => $fields['meal']->id, 'answer' => 'regular-1'],
+                ['form_field_id' => $fields['attendee-story']->id, 'answer' => 'Original answer'],
+                ['form_field_id' => $fields['visit-date']->id, 'answer' => '2026-11-09'],
+                ['form_field_id' => $fields['sessions']->id, 'answer' => []],
+            ],
+        ])
+        ->assertOk();
+
+    expect($fixture['registration']->answers()->where('form_field_id', $fields['sessions']->id)->first()->answer)
+        ->toBe([]);
+});
+
+test('registration answer updates reject invalid, missing, duplicate, and system fields without saving', function () {
+    $owner = User::factory()->create();
+    $fixture = registrationAnswerEditingFixture($this, $owner);
+    $fields = $fixture['fields'];
+    $validAnswers = [
+        ['form_field_id' => $fields['meal']->id, 'answer' => 'vegetarian-2'],
+        ['form_field_id' => $fields['attendee-story']->id, 'answer' => 'Updated answer'],
+        ['form_field_id' => $fields['visit-date']->id, 'answer' => '2026-11-10'],
+        ['form_field_id' => $fields['sessions']->id, 'answer' => ['evening-2']],
+    ];
+    $cases = [
+        'required choice' => collect($validAnswers)->map(fn ($answer) => $answer['form_field_id'] === $fields['meal']->id
+            ? [...$answer, 'answer' => '']
+            : $answer)->all(),
+        'invalid date' => collect($validAnswers)->map(fn ($answer) => $answer['form_field_id'] === $fields['visit-date']->id
+            ? [...$answer, 'answer' => 'not-a-date']
+            : $answer)->all(),
+        'unsupported choice' => collect($validAnswers)->map(fn ($answer) => $answer['form_field_id'] === $fields['meal']->id
+            ? [...$answer, 'answer' => 'unlisted-option']
+            : $answer)->all(),
+        'invalid checkbox option' => collect($validAnswers)->map(fn ($answer) => $answer['form_field_id'] === $fields['sessions']->id
+            ? [...$answer, 'answer' => ['not-an-option']]
+            : $answer)->all(),
+        'omitted custom answer' => array_slice($validAnswers, 0, -1),
+        'duplicate field id' => [...$validAnswers, $validAnswers[0]],
+        'system field' => [...$validAnswers, [
+            'form_field_id' => $fields['first-name']->id,
+            'answer' => 'Changed name',
+        ]],
+    ];
+
+    foreach ($cases as $case => $answers) {
+        $this->actingAs($owner)
+            ->patchJson('/api/events/'.$fixture['event']->slug.'/registrations/'.$fixture['registration']->id.'/answers', [
+                'answers' => $answers,
+            ])
+            ->assertUnprocessable("Failed validation case: {$case}");
+    }
+
+    expect($fixture['registration']->answers()->where('form_field_id', $fields['meal']->id)->first()->answer)
+        ->toBe('regular-1');
+    expect($fixture['registration']->answers()->where('form_field_id', $fields['attendee-story']->id)->first()->answer)
+        ->toBe('Original answer');
+    expect($fixture['attendee']->fresh()->first_name)->toBe('Jeremiah');
+});
+
+test('registration answer updates are scoped to the event owner and event registration', function () {
+    $owner = User::factory()->create();
+    $otherOwner = User::factory()->create();
+    $fixture = registrationAnswerEditingFixture($this, $owner);
+    $otherFixture = registrationAnswerEditingFixture($this, $otherOwner);
+    $payload = ['answers' => []];
+
+    $this->actingAs($owner)
+        ->patchJson('/api/events/'.$fixture['event']->slug.'/registrations/'.$otherFixture['registration']->id.'/answers', $payload)
+        ->assertNotFound();
+
+    $this->actingAs($otherOwner)
+        ->patchJson('/api/events/'.$fixture['event']->slug.'/registrations/'.$fixture['registration']->id.'/answers', $payload)
+        ->assertNotFound();
 });

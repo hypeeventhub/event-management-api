@@ -91,6 +91,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], '/events/{event:slug}', [EventController::class, 'update']);
         Route::patch('/events/{event:slug}/registration', [EventController::class, 'updateRegistrationAvailability']);
         Route::get('/events/{event:slug}/registrations', [EventController::class, 'registrations']);
+        Route::patch('/events/{event:slug}/registrations/{registrationId}/answers', [EventController::class, 'updateRegistrationAnswers']);
         Route::get('/events/{event:slug}/registrations/export', [EventController::class, 'registrationExport']);
         Route::get('/events/{event:slug}/invitations', [EventController::class, 'invitations']);
         Route::post('/events/{event:slug}/invitations', [EventController::class, 'sendInvitation']);
