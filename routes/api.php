@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\AttendeeDuplicateController;
 use App\Http\Controllers\EventController;
 use App\Http\Controllers\NominationController;
 use App\Http\Controllers\PasswordController;
@@ -65,6 +66,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('users', UserController::class)->except(['show']);
         Route::get('/events', [EventController::class, 'index']);
         Route::get('/events/history', [EventController::class, 'history']);
+        Route::get('/attendees/duplicates', [AttendeeDuplicateController::class, 'index']);
         Route::post('/events', [EventController::class, 'store']);
         Route::delete('/events/{event:slug}', [EventController::class, 'destroy']);
         Route::get('/events/{event:slug}/nomination-candidates', [NominationController::class, 'candidates']);
