@@ -10,6 +10,7 @@ class VotingSubjectResource extends JsonResource
     public function toArray(Request $request): array
     {
         $this->resource->loadCount(['contestants', 'votes']);
+        $frontendUrl = rtrim((string) config('app.frontend_url'), '/');
         $contestants = $this->contestants()->orderBy('display_order')->orderBy('id')
             ->get(['id', 'voting_subject_id', 'name', 'display_order', 'attendee_id'])
             ->map(fn ($contestant): array => $contestant->only(['id', 'name', 'display_order', 'attendee_id']));
@@ -27,9 +28,11 @@ class VotingSubjectResource extends JsonResource
             'contestant_count' => $this->contestants_count,
             'total_votes' => $this->votes_count,
             'contestants' => $contestants,
-            'public_url' => rtrim((string) config('app.frontend_url'), '/')
-                .($this->mode === 'nomination' ? '/nomination/' : '/vote/')
-                .$this->slug,
+            'public_url' => $this->mode === 'nomination'
+                ? $frontendUrl.'/nomination/'.$this->slug
+                : ($this->generated_from_subject_id && $this->generatedFromSubject
+                    ? $frontendUrl.'/nomination/'.$this->generatedFromSubject->slug
+                    : $frontendUrl.'/vote/'.$this->slug),
         ];
     }
 }

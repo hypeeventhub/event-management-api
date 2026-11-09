@@ -18,7 +18,10 @@ class NomineeSearchService
 
         // An existence query keeps attendees distinct even with repeat registrations.
         return Attendee::query()
-            ->whereHas('registrations', fn ($registrations) => $registrations->where('event_id', $event->id))
+            ->whereHas('registrations', fn ($registrations) => $registrations
+                ->where('event_id', $event->id)
+                ->where('status', 'confirmed')
+                ->whereHas('checkIns', fn ($checkIns) => $checkIns->where('result', 'accepted')))
             ->get(['id', 'first_name', 'last_name'])
             ->map(function (Attendee $attendee) use ($query): array {
                 $fullName = Str::squish($attendee->first_name.' '.$attendee->last_name);

@@ -19,10 +19,30 @@ class PublicNominationController extends Controller
     {
         abort_unless($subject->mode === 'nomination', 404);
 
-        return response()->json(['data' => [
+        $data = [
             'title' => $subject->title,
             'status' => $subject->status,
-        ]]);
+            'mode' => 'nomination',
+        ];
+
+        if ($subject->status === VotingSubject::STATUS_CLOSED) {
+            $generated = $subject->generatedSubject()->first();
+
+            if (! $generated) {
+                $data['mode'] = 'nomination_closed';
+            } elseif ($generated->status === VotingSubject::STATUS_DRAFT) {
+                $data['mode'] = 'voting_pending';
+            } elseif ($generated->status === VotingSubject::STATUS_ACTIVE) {
+                $data['mode'] = 'voting';
+                $data['title'] = $generated->title;
+                $data['voting_slug'] = $generated->slug;
+            } else {
+                $data['mode'] = 'voting_closed';
+                $data['title'] = $generated->title;
+            }
+        }
+
+        return response()->json(['data' => $data]);
     }
 
     public function candidates(Request $request, VotingSubject $subject, NomineeSearchService $search): JsonResponse
@@ -59,12 +79,18 @@ class PublicNominationController extends Controller
                     return response()->json(['message' => 'Invalid registration code.'], 422);
                 }
 
-                // Candidates can have any registration status, but must be
-                // associated with this event. Search and submission share the
-                // same event scope to prevent arbitrary attendee IDs.
+                if (! $registration->checkIns()->where('result', 'accepted')->exists()) {
+                    return response()->json(['message' => 'You must check in before submitting a nomination.'], 403);
+                }
+
+                // The selected nominee must be a confirmed attendee checked
+                // into this event, even if a client bypasses candidate search.
                 $attendee = Attendee::query()
                     ->whereKey($validated['attendee_id'])
-                    ->whereHas('registrations', fn ($registrations) => $registrations->where('event_id', $event->id))
+                    ->whereHas('registrations', fn ($registrations) => $registrations
+                        ->where('event_id', $event->id)
+                        ->where('status', 'confirmed')
+                        ->whereHas('checkIns', fn ($checkIns) => $checkIns->where('result', 'accepted')))
                     ->lockForUpdate()
                     ->first();
                 if (! $attendee) {

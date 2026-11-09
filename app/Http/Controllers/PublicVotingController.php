@@ -54,6 +54,10 @@ class PublicVotingController extends Controller
                     return response()->json(['message' => 'Invalid registration code.'], 422);
                 }
 
+                if (! $registration->checkIns()->where('result', 'accepted')->exists()) {
+                    return response()->json(['message' => 'You must check in before voting.'], 403);
+                }
+
                 $lockedSubject->votes()->create([
                     'voting_contestant_id' => $contestant->id,
                     'registration_id' => $registration->id,
