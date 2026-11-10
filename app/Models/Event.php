@@ -21,6 +21,9 @@ class Event extends Model
         'qr_description',
         'category',
         'capacity',
+        'seating_enabled',
+        'table_count',
+        'seats_per_table',
         'venue',
         'meeting_url',
         'starts_at',
@@ -40,6 +43,9 @@ class Event extends Model
             'registration_opens_at' => 'datetime',
             'registration_closes_at' => 'datetime',
             'registration_is_open' => 'boolean',
+            'seating_enabled' => 'boolean',
+            'table_count' => 'integer',
+            'seats_per_table' => 'integer',
         ];
     }
 
@@ -63,6 +69,11 @@ class Event extends Model
     public function registrations(): HasMany
     {
         return $this->hasMany(Registration::class);
+    }
+
+    public function seatAssignments(): HasMany
+    {
+        return $this->hasMany(EventSeatAssignment::class);
     }
 
     public function votingSubjects(): HasMany

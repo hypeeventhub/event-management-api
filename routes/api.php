@@ -3,6 +3,7 @@
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\AttendeeDuplicateController;
 use App\Http\Controllers\EventController;
+use App\Http\Controllers\EventSeatingController;
 use App\Http\Controllers\NominationController;
 use App\Http\Controllers\PasswordController;
 use App\Http\Controllers\PublicNominationController;
@@ -93,6 +94,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], '/events/{event:slug}', [EventController::class, 'update']);
         Route::patch('/events/{event:slug}/registration', [EventController::class, 'updateRegistrationAvailability']);
         Route::get('/events/{event:slug}/registrations', [EventController::class, 'registrations']);
+        Route::get('/events/{event:slug}/seating', [EventSeatingController::class, 'show']);
+        Route::patch('/events/{event:slug}/registrations/{registrationId}/seat', [EventSeatingController::class, 'assign']);
+        Route::delete('/events/{event:slug}/registrations/{registrationId}/seat', [EventSeatingController::class, 'unassign']);
         Route::patch('/events/{event:slug}/registrations/{registrationId}/answers', [EventController::class, 'updateRegistrationAnswers']);
         Route::get('/events/{event:slug}/registrations/export', [EventController::class, 'registrationExport']);
         Route::get('/events/{event:slug}/invitations', [EventController::class, 'invitations']);

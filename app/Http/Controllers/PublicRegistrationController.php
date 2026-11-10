@@ -128,6 +128,16 @@ class PublicRegistrationController extends Controller
                 ['email_normalized' => $email],
                 ['email' => $email, 'first_name' => $firstName, 'last_name' => $lastName],
             );
+            $attendee = Attendee::query()
+                ->whereKey($attendee->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($this->hasDuplicateActiveEventRegistration($lockedEvent, $attendee, $firstName, $lastName)) {
+                throw ValidationException::withMessages([
+                    'email' => 'This attendee is already registered for another ongoing or upcoming event.',
+                ]);
+            }
 
             if ($lockedEvent->registrations()->where('attendee_id', $attendee->id)->exists()) {
                 throw ValidationException::withMessages(['email' => 'This email is already registered for the event.']);
@@ -173,6 +183,37 @@ class PublicRegistrationController extends Controller
         return response()->json([
             'email' => $registration->attendee->email,
         ], 200);
+    }
+
+    private function hasDuplicateActiveEventRegistration(
+        Event $event,
+        Attendee $attendee,
+        string $firstName,
+        string $lastName,
+    ): bool {
+        $normalizedFirstName = Str::lower(trim($firstName));
+        $normalizedLastName = Str::lower(trim($lastName));
+
+        return $attendee->registrations()
+            ->where('status', 'confirmed')
+            ->where('event_id', '!=', $event->id)
+            ->whereHas('event', fn ($query) => $query
+                ->whereIn('status', ['published', 'live'])
+                ->where('ends_at', '>=', now()))
+            ->with('answers.field')
+            ->get()
+            ->contains(function (Registration $registration) use ($attendee, $normalizedFirstName, $normalizedLastName): bool {
+                $firstNameAnswer = $registration->answers
+                    ->first(fn ($answer): bool => $answer->field?->system_key === 'first_name')?->answer;
+                $lastNameAnswer = $registration->answers
+                    ->first(fn ($answer): bool => $answer->field?->system_key === 'last_name')?->answer;
+
+                $registeredFirstName = is_string($firstNameAnswer) ? $firstNameAnswer : $attendee->first_name;
+                $registeredLastName = is_string($lastNameAnswer) ? $lastNameAnswer : $attendee->last_name;
+
+                return Str::lower(trim($registeredFirstName)) === $normalizedFirstName
+                    && Str::lower(trim($registeredLastName)) === $normalizedLastName;
+            });
     }
 
     private function uniqueRegistrationCode(): string

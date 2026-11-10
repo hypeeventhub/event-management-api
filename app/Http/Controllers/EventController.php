@@ -229,7 +229,7 @@ class EventController extends Controller
         ]);
 
         $query = $event->registrations()
-            ->with(['attendee', 'answers.field.options', 'checkIns'])
+            ->with(['attendee', 'answers.field.options', 'checkIns', 'seatAssignment'])
             ->withExists(['votingVotes as has_voted'])
             ->when(isset($filters['status']), fn ($query) => $query->where('registrations.status', $filters['status']))
             ->when(isset($filters['check_in']), function ($query) use ($filters): void {
