@@ -17,7 +17,7 @@ class EventSeatingController extends Controller
         $this->ensureOwner($request, $event);
 
         $assignments = $event->seatAssignments()
-            ->with('registration.attendee')
+            ->with(['registration.attendee', 'registration.checkIns'])
             ->orderBy('table_number')
             ->orderBy('seat_number')
             ->get()
@@ -67,7 +67,7 @@ class EventSeatingController extends Controller
                 ]);
                 $assignment->save();
 
-                return $assignment->load('registration.attendee');
+                return $assignment->load(['registration.attendee', 'registration.checkIns']);
             });
         } catch (UniqueConstraintViolationException) {
             return response()->json(['message' => 'That seat is already assigned. Choose another seat.'], 409);
@@ -102,8 +102,13 @@ class EventSeatingController extends Controller
             'registration_id' => $assignment->registration_id,
             'first_name' => $assignment->registration?->attendee?->first_name,
             'last_name' => $assignment->registration?->attendee?->last_name,
+            'email' => $assignment->registration?->attendee?->email,
+            'registration_code' => $assignment->registration?->registration_code,
             'table_number' => $assignment->table_number,
             'seat_number' => $assignment->seat_number,
+            'checked_in' => $assignment->registration?->checkIns?->contains(
+                fn ($checkIn): bool => $checkIn->result === 'accepted',
+            ) ?? false,
         ];
     }
 }
