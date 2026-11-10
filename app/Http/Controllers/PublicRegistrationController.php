@@ -60,6 +60,7 @@ class PublicRegistrationController extends Controller
                 ->reject(fn ($field) => $field->system_key === 'gender')
                 ->values());
         }
+        $event->makeHidden('group_event_code');
 
         return response()->json([
             'data' => $event,
@@ -133,9 +134,9 @@ class PublicRegistrationController extends Controller
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if ($this->hasDuplicateActiveEventRegistration($lockedEvent, $attendee, $firstName, $lastName)) {
+            if ($this->hasDuplicateGroupEventRegistration($lockedEvent, $attendee, $firstName, $lastName)) {
                 throw ValidationException::withMessages([
-                    'email' => 'This attendee is already registered for another ongoing or upcoming event.',
+                    'email' => 'This attendee is already registered for another event in this group.',
                 ]);
             }
 
@@ -185,21 +186,24 @@ class PublicRegistrationController extends Controller
         ], 200);
     }
 
-    private function hasDuplicateActiveEventRegistration(
+    private function hasDuplicateGroupEventRegistration(
         Event $event,
         Attendee $attendee,
         string $firstName,
         string $lastName,
     ): bool {
+        $groupEventCode = trim((string) $event->group_event_code);
+        if ($groupEventCode === '') {
+            return false;
+        }
+
         $normalizedFirstName = Str::lower(trim($firstName));
         $normalizedLastName = Str::lower(trim($lastName));
 
         return $attendee->registrations()
             ->where('status', 'confirmed')
             ->where('event_id', '!=', $event->id)
-            ->whereHas('event', fn ($query) => $query
-                ->whereIn('status', ['published', 'live'])
-                ->where('ends_at', '>=', now()))
+            ->whereHas('event', fn ($query) => $query->where('group_event_code', $groupEventCode))
             ->with('answers.field')
             ->get()
             ->contains(function (Registration $registration) use ($attendee, $normalizedFirstName, $normalizedLastName): bool {

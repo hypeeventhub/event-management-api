@@ -20,6 +20,7 @@ class StoreEventRequest extends FormRequest
             'description' => ['nullable', 'string', 'max:10000'],
             'qr_description' => ['nullable', 'string', 'max:10000'],
             'category' => ['nullable', 'string', 'max:100'],
+            'group_event_code' => ['nullable', 'string', 'max:100'],
             'capacity' => ['nullable', 'integer', 'min:1'],
             'seating_enabled' => ['sometimes', 'boolean'],
             'table_count' => ['nullable', 'integer', 'min:1', 'max:1000', 'required_if:seating_enabled,true'],

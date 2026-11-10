@@ -20,6 +20,7 @@ class Event extends Model
         'description',
         'qr_description',
         'category',
+        'group_event_code',
         'capacity',
         'seating_enabled',
         'table_count',

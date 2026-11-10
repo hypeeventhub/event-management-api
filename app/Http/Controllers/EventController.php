@@ -575,6 +575,12 @@ class EventController extends Controller
     {
         $data = $request->safe()->except('registration_form');
 
+        if (array_key_exists('group_event_code', $data)) {
+            $data['group_event_code'] = filled($data['group_event_code'])
+                ? Str::upper(trim($data['group_event_code']))
+                : null;
+        }
+
         foreach (['starts_at', 'ends_at', 'registration_opens_at', 'registration_closes_at'] as $field) {
             if (! empty($data[$field])) {
                 $data[$field] = Carbon::parse($data[$field])->utc()->format('Y-m-d H:i:s');
