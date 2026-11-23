@@ -25,7 +25,7 @@ class RaffleController extends Controller
         $winners = $event->raffleWinners()->orderByDesc('won_at')->orderByDesc('id')->paginate(25, ['id', 'name', 'won_at'], 'winners_page');
 
         return response()->json(['data' => [
-            'event' => $event->only(['id', 'title', 'slug']),
+            'event' => $event->only(['id', 'title', 'slug', 'ends_at', 'timezone']),
             'settings' => $this->settings($settings),
             'entries' => $event->raffleEntries()->orderBy('position')->get(['id', 'name', 'position']),
             'pending_draw' => $pending ? $this->draw($pending) : null,

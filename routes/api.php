@@ -5,9 +5,12 @@ use App\Http\Controllers\AttendeeDuplicateController;
 use App\Http\Controllers\EventController;
 use App\Http\Controllers\EventSeatingController;
 use App\Http\Controllers\NominationController;
+use App\Http\Controllers\NominationTopicController;
 use App\Http\Controllers\PasswordController;
+use App\Http\Controllers\PublicEventPollController;
 use App\Http\Controllers\PublicNominationController;
 use App\Http\Controllers\PublicRegistrationController;
+use App\Http\Controllers\PublicTopicSubmissionController;
 use App\Http\Controllers\PublicVotingController;
 use App\Http\Controllers\RaffleController;
 use App\Http\Controllers\UserController;
@@ -50,6 +53,24 @@ Route::post('/nominations/{subject:slug}/submit', [PublicNominationController::c
     ->middleware(['throttle:public-nomination-submission', 'throttle:public-nomination-registration'])
     ->missing(fn () => response()->json(['message' => 'Not Found'], 404));
 
+Route::get('/public/events/{event:slug}/poll', [PublicEventPollController::class, 'show'])
+    ->withoutMiddleware(EnsureFrontendRequestsAreStateful::class)
+    ->middleware('throttle:300,1,public-event-poll:')
+    ->missing(fn () => response()->json(['message' => 'Not Found'], 404));
+
+Route::prefix('/public/events/{event:slug}/topics/{topic}')
+    ->withoutMiddleware(EnsureFrontendRequestsAreStateful::class)
+    ->middleware(['throttle:public-topic-submission', 'throttle:public-topic-registration'])
+    ->whereNumber('topic')
+    ->group(function () {
+        Route::post('/nominations', [PublicTopicSubmissionController::class, 'nominations'])
+            ->name('public-topic.nominations')
+            ->missing(fn () => response()->json(['message' => 'Not Found'], 404));
+        Route::post('/votes', [PublicTopicSubmissionController::class, 'votes'])
+            ->name('public-topic.votes')
+            ->missing(fn () => response()->json(['message' => 'Not Found'], 404));
+    });
+
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) {
         return $request->user();
@@ -75,6 +96,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::patch('/events/{event:slug}/nominations/{subject:slug}', [NominationController::class, 'update'])->withoutScopedBindings();
         Route::post('/events/{event:slug}/nominations/{subject:slug}/open', [NominationController::class, 'open'])->withoutScopedBindings();
         Route::post('/events/{event:slug}/nominations/{subject:slug}/close', [NominationController::class, 'close'])->withoutScopedBindings();
+        Route::get('/events/{event:slug}/nomination-topics', [NominationTopicController::class, 'index']);
+        Route::post('/events/{event:slug}/nomination-topics', [NominationTopicController::class, 'store']);
+        Route::post('/events/{event:slug}/nomination-topics/{topic}/open', [NominationTopicController::class, 'open'])->whereNumber('topic');
+        Route::post('/events/{event:slug}/nomination-topics/{topic}/close-nominations', [NominationTopicController::class, 'closeNominations'])->whereNumber('topic');
+        Route::post('/events/{event:slug}/nomination-topics/{topic}/close-voting', [NominationTopicController::class, 'closeVoting'])->whereNumber('topic');
         Route::get('/events/{event:slug}/voting-subjects', [VotingSubjectController::class, 'index']);
         Route::post('/events/{event:slug}/voting-subjects', [VotingSubjectController::class, 'store']);
         Route::get('/events/{event:slug}/voting-subjects/{subject}', [VotingSubjectController::class, 'show']);

@@ -8,6 +8,7 @@ use App\Http\Requests\UpdateVotingSubjectRequest;
 use App\Http\Resources\VotingSubjectResource;
 use App\Models\Event;
 use App\Models\VotingSubject;
+use App\Services\NominationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -19,7 +20,9 @@ class VotingSubjectController extends Controller
     {
         $this->owner($request, $event);
 
-        $subjects = $event->votingSubjects()->orderByDesc('id')->get()
+        $subjects = $event->votingSubjects()
+            ->when($request->query('scope') === 'standalone', fn ($query) => $query->whereNull('nomination_topic_id'))
+            ->orderByDesc('id')->get()
             ->map(fn (VotingSubject $subject): array => $this->subjectData($subject));
 
         return response()->json(['data' => $subjects]);
@@ -79,6 +82,9 @@ class VotingSubjectController extends Controller
 
         return DB::transaction(function () use ($event, $subject): JsonResponse {
             $record = $this->findSubject($event, $subject, true);
+            if ($record->nomination_topic_id !== null) {
+                return $this->conflict('Topic rounds can only be managed through their topic.');
+            }
             if ($record->status !== VotingSubject::STATUS_DRAFT) {
                 return $this->conflict('Only draft voting subjects can be deleted.');
             }
@@ -109,13 +115,20 @@ class VotingSubjectController extends Controller
         });
     }
 
-    public function close(Request $request, Event $event, string $subject): JsonResponse
+    public function close(Request $request, Event $event, string $subject, NominationService $nominations): JsonResponse
     {
         $this->owner($request, $event);
 
+        $record = $this->findSubject($event, $subject);
+        abort_unless($record->mode === 'manual', 404);
+        if ($record->nomination_topic_id !== null) {
+            $record = $nominations->closeTopicBallot($event, $record);
+
+            return response()->json(['data' => $this->subjectData($record)]);
+        }
+
         return DB::transaction(function () use ($event, $subject): JsonResponse {
             $record = $this->findSubject($event, $subject, true);
-            abort_unless($record->mode === 'manual', 404);
             if ($record->status !== VotingSubject::STATUS_ACTIVE) {
                 return $this->conflict('Only active voting subjects can be closed.');
             }
