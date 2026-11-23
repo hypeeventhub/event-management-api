@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Models\Event;
+use App\Models\NominationTopic;
 use App\Models\VotingSubject;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -99,6 +101,51 @@ class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinute(10)->by($this->votingThrottleKey($identity));
         });
+
+        RateLimiter::for('public-topic-submission', function (Request $request): Limit {
+            return Limit::perMinute(120)->by($this->votingThrottleKey([
+                ...$this->topicThrottleScope($request), $request->ip(),
+            ]));
+        });
+
+        RateLimiter::for('public-topic-registration', function (Request $request): Limit {
+            [$phase, $topicId] = $this->topicThrottleScope($request);
+            $event = $request->route('event');
+            $code = $request->input('registration_code');
+            $normalizedCode = is_string($code) && mb_strlen($code) <= 255 ? Str::upper(trim($code)) : null;
+            $stage = $phase === 'public-topic.nominations'
+                ? NominationTopic::STAGE_NOMINATION_ACTIVE
+                : NominationTopic::STAGE_VOTING_ACTIVE;
+            $registrationId = $normalizedCode !== null && $normalizedCode !== ''
+                ? DB::table('registrations')
+                    ->join('nomination_topics', 'nomination_topics.event_id', '=', 'registrations.event_id')
+                    ->join('events', 'events.id', '=', 'registrations.event_id')
+                    ->where('nomination_topics.id', $topicId)
+                    ->where('nomination_topics.stage', $stage)
+                    ->where('events.slug', $event instanceof Event ? $event->slug : (string) $event)
+                    ->whereNull('events.deleted_at')
+                    ->where('registrations.status', 'confirmed')
+                    ->where('registrations.registration_code', $normalizedCode)
+                    ->value('registrations.id')
+                : null;
+
+            // Database-equivalent spellings of a valid code share a bucket.
+            $identity = $registrationId !== null
+                ? ['registration', $registrationId]
+                : ['code', $normalizedCode];
+
+            return Limit::perMinute(10)->by($this->votingThrottleKey([$phase, $topicId, ...$identity]));
+        });
+    }
+
+    private function topicThrottleScope(Request $request): array
+    {
+        $topic = $request->route('topic');
+
+        return [
+            $request->route()->getName(),
+            $topic instanceof NominationTopic ? (string) $topic->id : (ltrim((string) $topic, '0') ?: '0'),
+        ];
     }
 
     private function votingSubjectSlug(Request $request): string

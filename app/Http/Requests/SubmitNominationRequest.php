@@ -13,6 +13,7 @@ class SubmitNominationRequest extends FormRequest
         $subject = $this->route('subject');
 
         if (! $subject instanceof VotingSubject
+            || $subject->nomination_topic_id !== null
             || $subject->mode !== 'nomination'
             || $subject->status !== VotingSubject::STATUS_ACTIVE) {
             throw new HttpResponseException(response()->json(['message' => 'Not Found'], 404));

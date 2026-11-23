@@ -87,6 +87,11 @@ class Event extends Model
         return $this->votingSubjects()->where('mode', 'nomination');
     }
 
+    public function nominationTopics(): HasMany
+    {
+        return $this->hasMany(NominationTopic::class);
+    }
+
     public function raffleDraws(): HasMany
     {
         return $this->hasMany(RaffleDraw::class);

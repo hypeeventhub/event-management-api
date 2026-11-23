@@ -17,6 +17,7 @@ class VotingSubject extends Model
 
     protected $fillable = [
         'event_id', 'slug', 'title', 'status', 'mode', 'top_n', 'generated_from_subject_id',
+        'nomination_topic_id', 'category',
     ];
 
     protected static function booted(): void
@@ -41,6 +42,11 @@ class VotingSubject extends Model
     public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
+    }
+
+    public function nominationTopic(): BelongsTo
+    {
+        return $this->belongsTo(NominationTopic::class);
     }
 
     public function contestants(): HasMany
